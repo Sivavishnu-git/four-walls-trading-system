@@ -1,0 +1,227 @@
+# ============================================
+# LiveTrading Project .gitignore
+# ============================================
+
+# ============================================
+# SECURITY - NEVER COMMIT THESE!
+# ============================================
+# Access tokens and API credentials
+*.token
+*.key
+.env
+.env.local
+.env.development
+.env.production
+.env.test
+config/secrets.json
+config/credentials.json
+secrets/
+credentials/
+
+# Upstox API tokens (CRITICAL - Never commit!)
+*access_token*
+*api_key*
+*api_secret*
+
+# ============================================
+# Node.js Dependencies
+# ============================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ============================================
+# Build Output
+# ============================================
+dist/
+dist-ssr/
+build/
+*.local
+
+# ============================================
+# Editor & IDE
+# ============================================
+# VSCode
+.vscode/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.code-workspace
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+*~
+\#*\#
+.\#*
+
+# ============================================
+# Operating System Files
+# ============================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+.directory
+.Trash-*
+
+# ============================================
+# Logs
+# ============================================
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ============================================
+# Testing
+# ============================================
+coverage/
+*.lcov
+.nyc_output/
+.grunt/
+.lock-wscript
+
+# ============================================
+# Temporary Files
+# ============================================
+tmp/
+temp/
+*.tmp
+*.temp
+*.cache
+
+# ============================================
+# Package Manager
+# ============================================
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+.pnpm-store/
+
+# ============================================
+# Trading Specific Files
+# ============================================
+# Large instrument data files (keep NSE.json in repo for now, but can exclude if too large)
+# docs/NSE.json
+
+# Trading logs and history
+trading_logs/
+order_history/
+trade_history/
+*.trade.log
+
+# Backup files
+*.backup
+*.bak
+backups/
+
+# Database files (if you add any)
+*.db
+*.sqlite
+*.sqlite3
+
+# ============================================
+# Python (if you add Python scripts)
+# ============================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+env/
+.venv
+
+# ============================================
+# Misc
+# ============================================
+.cache/
+.parcel-cache/
+.next/
+.nuxt/
+.vercel
+.netlify/
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Optional stylelint cache
+.stylelintcache
+
+# Microbundle cache
+.rpt2_cache/
+.rts2_cache_cjs/
+.rts2_cache_es/
+.rts2_cache_umd/
+
+# Optional REPL history
+.node_repl_history
+
+# Output of 'npm pack'
+*.tgz
+
+# Yarn Integrity file
+.yarn-integrity
+
+# ============================================
+# Project Specific
+# ============================================
+# Ignore personal notes
+NOTES.md
+TODO.md
+PERSONAL_*.md
+
+# Ignore test data
+test_data/
+mock_data/
+
+# Ignore screenshots (unless needed for docs)
+screenshots/
+*.png
+*.jpg
+*.jpeg
+!docs/images/*.png
+!docs/images/*.jpg
+
+# ============================================
+# Keep These Files (Examples)
+# ============================================
+# !.gitkeep
+# !README.md
+# !LICENSE

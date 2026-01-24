@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">LiveTrading</string>
+    <string name="title_activity_main">LiveTrading</string>
+    <string name="package_name">com.ragu.livetrading</string>
+    <string name="custom_url_scheme">com.ragu.livetrading</string>
+</resources>

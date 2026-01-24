@@ -1,0 +1,23 @@
+{
+    "name": "Live Nifty Trading",
+    "short_name": "NiftyLive",
+    "description": "Real-time Nifty 50 Futures Chart with Auto-Support/Resistance",
+    "theme_color": "#131722",
+    "background_color": "#131722",
+    "display": "standalone",
+    "orientation": "portrait",
+    "start_url": "./",
+    "scope": "./",
+    "icons": [
+        {
+            "src": "vite.svg",
+            "sizes": "192x192",
+            "type": "image/svg+xml"
+        },
+        {
+            "src": "vite.svg",
+            "sizes": "512x512",
+            "type": "image/svg+xml"
+        }
+    ]
+}
