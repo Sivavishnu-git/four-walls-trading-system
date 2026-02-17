@@ -40,12 +40,18 @@ export const useUpstoxPolling = (accessToken, instrumentKeys = [], interval = 20
             // Transform Upstox V2 Quote format to match the internal 'data' structure
             // V2 response structure: { data: { "INSTRUMENT_KEY": { ... } } }
             if (resData.data) {
+                console.log("🔥 API Response for keys:", instrumentKeys);
+                console.log("📦 Raw Data:", JSON.stringify(resData.data, null, 2));
+
                 const updates = {};
                 Object.keys(resData.data).forEach(key => {
                     const quote = resData.data[key];
+                    // IMPORTANT: API returns key as "NSE_FO:SYMBOL" but we need "NSE_FO|TOKEN"
+                    // We use the instrument_token from the response itself to ensure it matches what the UI expects
+                    const normalizedKey = quote.instrument_token || key;
                     const ohlc = quote.ohlc || {};
 
-                    updates[key] = {
+                    updates[normalizedKey] = {
                         ltp: quote.last_price,
                         close: quote.close || ohlc.close,
                         oi: quote.oi || (quote.depth?.buy ? 0 : 0), // OI might be in depth or specific quote fields

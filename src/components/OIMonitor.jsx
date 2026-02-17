@@ -1,28 +1,38 @@
 import { useEffect, useState, useRef } from 'react';
 import { TrendingUp, TrendingDown, Activity, RefreshCw, Lock, Unlock } from 'lucide-react';
 import { useUpstoxPolling } from '../hooks/useUpstoxPolling';
+// import { MarketTrendAnalysis } from './MarketTrendAnalysis';
+// import { OptionEntryPlanner } from './OptionEntryPlanner';
 
-export const OIMonitor = () => {
-    const [token, setToken] = useState(import.meta.env.VITE_UPSTOX_ACCESS_TOKEN || "");
+export const OIMonitor = ({ token: propToken }) => {
+    const [token, setToken] = useState(propToken || import.meta.env.VITE_UPSTOX_ACCESS_TOKEN || "");
     const [showTokenInput, setShowTokenInput] = useState(false);
     const [isLive, setIsLive] = useState(false);
+
+    // Sync token from props
+    useEffect(() => {
+        if (propToken) setToken(propToken);
+    }, [propToken]);
     const [oiHistory, setOiHistory] = useState([]);
     const [currentOI, setCurrentOI] = useState(null);
     const [oiChange, setOiChange] = useState(null);
+    const [oiTrend5Min, setOiTrend5Min] = useState(null); // 'increasing', 'decreasing', 'neutral'
     const [lastUpdate, setLastUpdate] = useState(null);
     const intervalRef = useRef(null);
 
     // Nifty Future instrument key (Current Month Future - Has OI data)
-    const instrumentKey = "NSE_FO|49229";
+    const instrumentKey = import.meta.env.VITE_INSTRUMENT_KEY || "NSE_FO|49229";
 
-    const { connect, disconnect, data: liveData, status: wsStatus, error: pollingError } = useUpstoxPolling(token, [instrumentKey], 2000);
+    const { connect, disconnect, data: liveData, status: wsStatus, error: pollingError } = useUpstoxPolling(token, [instrumentKey], parseInt(import.meta.env.VITE_POLLING_INTERVAL) || 120000);
 
     // Capture OI every 2 minutes for the history table
     useEffect(() => {
         if (!isLive || !liveData || !liveData[instrumentKey]) return;
 
         const captureOI = () => {
-            const feedData = liveData[instrumentKey];
+            const feedData = liveData?.[instrumentKey];
+            if (!feedData) return;
+
             // OI is now directly available in the feedData object
             const oi = feedData.oi || 0;
             const ltp = feedData.ltp || 0;
@@ -49,9 +59,21 @@ export const OIMonitor = () => {
 
                 updated.push(newEntry);
 
-                // Keep only last 5 entries (10 minutes of data)
-                if (updated.length > 5) {
+                // Keep only last 10 entries (20 minutes of data) to allow 5min calc
+                if (updated.length > 10) {
                     updated.shift();
+                }
+
+                // Calculate 5-minute trend
+                if (updated.length >= 3) {
+                    // Get entry from roughly 5-6 mins ago (index: length - 3 or length - 4)
+                    const compareIndex = Math.max(0, updated.length - 3);
+                    const pastEntry = updated[compareIndex];
+                    const diff = oi - pastEntry.oi;
+
+                    if (diff > 0) setOiTrend5Min('increasing');
+                    else if (diff < 0) setOiTrend5Min('decreasing');
+                    else setOiTrend5Min('neutral');
                 }
 
                 return updated;
@@ -66,8 +88,11 @@ export const OIMonitor = () => {
             }
         };
 
-        // Capture immediately
-        captureOI();
+        // Capture immediately ONLY if we don't have recent data
+        // This prevents double entries on re-renders
+        if (oiHistory.length === 0) {
+            captureOI();
+        }
 
         // Then capture every 2 minutes
         intervalRef.current = setInterval(captureOI, 2 * 60 * 1000);
@@ -85,7 +110,7 @@ export const OIMonitor = () => {
             console.log("Auto-connecting with token...");
             handleConnect();
         }
-    }, []);
+    }, [token]); // Added token dependency to ensure it runs when token loads
 
     // Debug: Log live data changes
     useEffect(() => {
@@ -93,6 +118,87 @@ export const OIMonitor = () => {
             console.log("Live data received:", liveData[instrumentKey]);
         }
     }, [liveData, instrumentKey]);
+
+    // NEW: Fetch Previous Day's OI for Daily Change Calculation
+    const [previousDayOI, setPreviousDayOI] = useState(null);
+
+    useEffect(() => {
+        if (!token) return;
+
+        const fetchHistory = async () => {
+            try {
+                // Fetch last 5 days of daily candles
+                const today = new Date().toISOString().split('T')[0];
+                const fiveDaysAgo = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+                console.log(`Fetching history for Previous OI: ${instrumentKey}`);
+                const response = await fetch(`http://localhost:3000/api/historical?instrument_key=${encodeURIComponent(instrumentKey)}&interval=day&to_date=${today}&from_date=${fiveDaysAgo}`, {
+                    headers: { "Authorization": `Bearer ${token}` }
+                });
+
+                const json = await response.json();
+                if (json.status === 'success' && json.data && json.data.candles) {
+                    const candles = json.data.candles;
+                    // Sort by time ascending
+                    candles.sort((a, b) => new Date(a[0]) - new Date(b[0]));
+
+                    console.log("Daily Candles:", candles);
+
+                    // We need the LAST COMPLETED trading day. 
+                    // If today is a trading day and market is open, the last candle MIGHT be today.
+                    // If market is closed (e.g. Sat), limit is Fri.
+
+                    // Strategy: 
+                    // 1. Get the last candle.
+                    // 2. If its date is TODAY, then use the one before it (Yesterday).
+                    // 3. If its date is NOT today, then use it as the "Previous Close" (assuming we are in a new session or weekend).
+
+                    // However, 'Daily Change' usually implies Change from T-1 Close.
+
+                    if (candles.length > 0) {
+                        // Let's take the second last candle as T-1 if the last one is Today?
+                        // Or just take the last candle if we assume historical API only updates after close?
+                        // Upstox historical 'day' candles update live? Usually not immediately stable.
+
+                        // Safe bet: The 'oi' field in the quote usually relates to the change from the Previous Close.
+                        // So we want the OI of the *previous* candle relative to the current live session.
+
+                        // Let's assume the last candle in the list is the most recent *session*. 
+                        // If we are LIVE trading, we want the PREVIOUS session's OI.
+
+                        // Check if the last candle is 'Today'
+                        const lastCandle = candles[candles.length - 1];
+                        const lastDate = new Date(lastCandle[0]).toDateString();
+                        const currentDate = new Date().toDateString();
+
+                        let targetCandle;
+
+                        if (lastDate === currentDate) {
+                            // If last candle is today, we need the one before it
+                            targetCandle = candles.length > 1 ? candles[candles.length - 2] : null;
+                        } else {
+                            // If last candle is NOT today (e.g. yesterday), use it
+                            targetCandle = lastCandle;
+                        }
+
+                        if (targetCandle) {
+                            // Index 6 is OI in V3 API [timestamp, open, high, low, close, vol, oi]
+                            const prevOI = targetCandle[6];
+                            console.log("Found Previous Day OI:", prevOI, "Date:", targetCandle[0]);
+                            setPreviousDayOI(prevOI);
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error("Error fetching previous OI:", err);
+            }
+        };
+
+        fetchHistory();
+    }, [token, instrumentKey]);
+
+    // Calculate Daily Change
+    const dailyOIChange = (currentOI !== null && previousDayOI !== null) ? (currentOI - previousDayOI) : null;
 
     const handleConnect = async () => {
         if (!token) {
@@ -176,6 +282,37 @@ export const OIMonitor = () => {
                             Disconnect
                         </button>
                     )}
+                    <button
+                        onClick={async () => {
+                            try {
+                                const res = await fetch('http://localhost:3000/api/tools/find-nifty-future');
+                                const data = await res.json();
+                                console.log("--- Active Nifty Futures ---");
+                                if (data.data) {
+                                    data.data.forEach(f => {
+                                        console.log(`${f.trading_symbol} (${f.expiry}): ${f.instrument_key}`);
+                                    });
+                                    alert(`Check Console for Keys!\nCurrent Configured Key: ${instrumentKey}`);
+                                } else {
+                                    alert("Error fetching keys: " + (data.error || "Unknown error"));
+                                }
+                            } catch (e) {
+                                alert("Failed to fetch keys. Ensure Proxy Server is running.");
+                                console.error(e);
+                            }
+                        }}
+                        style={{
+                            padding: '10px',
+                            background: 'rgba(255,255,255,0.1)',
+                            border: '1px solid rgba(255,255,255,0.2)',
+                            borderRadius: '8px',
+                            cursor: 'pointer',
+                            color: '#aaa'
+                        }}
+                        title="Check Active Nifty Future Keys"
+                    >
+                        🔍
+                    </button>
                 </div>
             </div>
 
@@ -187,6 +324,17 @@ export const OIMonitor = () => {
                     <div className="stat-subtitle">Open Interest</div>
                 </div>
 
+                <div className="stat-card">
+                    <div className="stat-label">Daily OI Change</div>
+                    <div className="stat-value" style={{ color: getChangeColor(dailyOIChange) }}>
+                        <span className="change-icon">{getChangeIcon(dailyOIChange)}</span>
+                        {dailyOIChange !== null ? formatNumber(Math.abs(dailyOIChange)) : '--'}
+                    </div>
+                    <div className="stat-subtitle">
+                        {dailyOIChange !== null ? (dailyOIChange > 0 ? 'Added Today' : 'Unwound Today') : 'Calculating...'}
+                    </div>
+                </div>
+
                 <div className="stat-card" style={{ borderColor: getChangeColor(oiChange) }}>
                     <div className="stat-label">OI Change (2 min)</div>
                     <div className="stat-value" style={{ color: getChangeColor(oiChange) }}>
@@ -196,6 +344,23 @@ export const OIMonitor = () => {
                     <div className="stat-subtitle">
                         {oiChange !== null && oiChange !== 0 ? `${oiChange > 0 ? '+' : '-'}${Math.abs(oiChange).toFixed(2)}` : 'No Change'}
                     </div>
+                </div>
+
+                <div className="stat-card">
+                    <div className="stat-label">OI Trend (5 min)</div>
+                    <div className="stat-value" style={{
+                        color: oiTrend5Min === 'increasing' ? '#26a69a' : oiTrend5Min === 'decreasing' ? '#ef5350' : '#fff',
+                        display: 'flex', alignItems: 'center', gap: '8px'
+                    }}>
+                        {oiTrend5Min === 'increasing' ? <TrendingUp size={24} /> :
+                            oiTrend5Min === 'decreasing' ? <TrendingDown size={24} /> :
+                                <Activity size={24} />}
+                        <span style={{ fontSize: '1.2rem', fontWeight: 'normal' }}>
+                            {oiTrend5Min === 'increasing' ? 'INCREASING' :
+                                oiTrend5Min === 'decreasing' ? 'DECREASING' : 'NEUTRAL'}
+                        </span>
+                    </div>
+                    <div className="stat-subtitle">Based on last 5 min</div>
                 </div>
 
                 <div className="stat-card">
@@ -214,6 +379,12 @@ export const OIMonitor = () => {
                     <div className="stat-subtitle">Captured Intervals</div>
                 </div>
             </div>
+
+            {/* NEW: Market Trend Analysis */}
+            {/* <MarketTrendAnalysis history={oiHistory} /> */}
+
+            {/* NEW: Option Entry Planner */}
+            {/* <OptionEntryPlanner /> */}
 
             {/* OI History Table */}
             <div className="history-section">
