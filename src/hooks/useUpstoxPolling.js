@@ -59,6 +59,7 @@ export const useUpstoxPolling = (accessToken, instrumentKeys = [], interval = 20
                         open: ohlc.open || 0,
                         high: ohlc.high || 0,
                         low: ohlc.low || 0,
+                        symbol: quote.symbol || key.split(':')[1] || key,
                         last_updated: quote.timestamp,
                         full: quote // Keep the full original quote for flexibility
                     };
