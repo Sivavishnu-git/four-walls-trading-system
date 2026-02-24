@@ -1,0 +1,19 @@
+services:
+  # Web service - serves both API and frontend
+  - type: web
+    name: nifty-oi-monitor
+    env: node
+    region: singapore
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: UPSTOX_API_KEY
+        sync: false
+      - key: UPSTOX_API_SECRET
+        sync: false
+      - key: UPSTOX_REDIRECT_URI
+        sync: false
+    healthCheckPath: /api/health
