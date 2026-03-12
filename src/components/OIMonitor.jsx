@@ -39,8 +39,55 @@ export const OIMonitor = ({ token: propToken }) => {
 
     // Nifty Future instrument key (Current Month Future - Has OI data)
     const [instrumentKey, setInstrumentKey] = useState(
-        import.meta.env.VITE_INSTRUMENT_KEY || "NSE_FO|49229",
+        import.meta.env.VITE_INSTRUMENT_KEY || "NSE_FO|59182",
     );
+
+
+    const [searchQuery, setSearchQuery] = useState("");
+    const [searchResults, setSearchResults] = useState([]);
+    const [isSearching, setIsSearching] = useState(false);
+    const [showDropdown, setShowDropdown] = useState(false);
+
+    const handleSearch = async (query) => {
+        setSearchQuery(query);
+        if (query.length < 3) {
+            setSearchResults([]);
+            setShowDropdown(false);
+            return;
+        }
+
+        setIsSearching(true);
+        setShowDropdown(true);
+        try {
+            const res = await fetch(`http://localhost:3000/api/tools/search-master?query=${query}`);
+            const result = await res.json();
+            if (result.status === "success") {
+                setSearchResults(result.data);
+            }
+        } catch (err) {
+            console.error("Search failed:", err);
+        } finally {
+            setIsSearching(false);
+        }
+    };
+
+    const selectInstrument = (item) => {
+        setInstrumentKey(item.key);
+        setSearchQuery(item.symbol);
+        setShowDropdown(false);
+        setSearchResults([]);
+    };
+
+    // Close dropdown when clicking outside
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (!event.target.closest('.token-input-group')) {
+                setShowDropdown(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
 
     const {
         connect,
@@ -57,7 +104,16 @@ export const OIMonitor = ({ token: propToken }) => {
     // Ref to always hold the latest data for the interval timer
     const latestDataRef = useRef(null);
     useEffect(() => {
-        latestDataRef.current = liveData?.[instrumentKey];
+        const feedData = liveData?.[instrumentKey];
+        if (feedData) {
+            latestDataRef.current = feedData;
+
+            // NEW: Update "Current" stats immediately for the UI cards
+            // This ensures the dashboard isn't empty while waiting for the 3-min interval
+            setCurrentOI(feedData.oi);
+            setOiChange(feedData.oi - (firstSessionOIRef.current || feedData.oi));
+            setLastUpdate(new Date());
+        }
     }, [liveData, instrumentKey]);
 
     // Capture OI every 3 minutes (aligned with 15:12 start)
@@ -114,26 +170,28 @@ export const OIMonitor = ({ token: propToken }) => {
         };
 
         const setupSyncTimer = () => {
+            // 1. Capture immediately so the table isn't empty
+            captureOI();
+
             const now = new Date();
-            const startAt = new Date();
-            startAt.setHours(15, 12, 0, 0);
+            const anchor = new Date();
+            anchor.setHours(15, 12, 0, 0);
 
-            let msToStart = startAt.getTime() - now.getTime();
+            // Calculate milliseconds until the next 3-minute interval relative to the anchor
+            const intervalMs = 3 * 60 * 1000;
+            const diff = (now.getTime() - anchor.getTime()) % intervalMs;
 
-            // If it's already past 15:12 today, find next 3-min aligned slot
-            if (msToStart < 0) {
-                const diff = (now.getTime() - startAt.getTime()) % (3 * 60 * 1000);
-                msToStart = 3 * 60 * 1000 - diff;
-            }
+            // If we are before the anchor or between intervals, find the MS until the NEXT bucket
+            let msToNextBucket = intervalMs - (diff < 0 ? diff + intervalMs : diff);
 
             console.log(
-                `⏰ Syncing Capture: Starting in ${Math.round(msToStart / 1000)}s`,
+                `⏰ Syncing Capture: Next snapshot in ${Math.round(msToNextBucket / 1000)}s`,
             );
 
             const initialTimeout = setTimeout(() => {
                 captureOI();
-                intervalRef.current = setInterval(captureOI, 3 * 60 * 1000);
-            }, msToStart);
+                intervalRef.current = setInterval(captureOI, intervalMs);
+            }, msToNextBucket);
 
             return initialTimeout;
         };
@@ -246,7 +304,9 @@ export const OIMonitor = ({ token: propToken }) => {
         fetchHistory();
     }, [token, instrumentKey]);
 
-    // Calculate Daily Change
+    // Calculate Daily Change (Change from Previous Day's Close)
+    // If the API provides 'oi' in the quote, that's live.
+    // We subtract the Previous Day's OI to get the "Daily Change".
     const dailyOIChange =
         currentOI !== null && previousDayOI !== null
             ? currentOI - previousDayOI
@@ -314,7 +374,7 @@ export const OIMonitor = ({ token: propToken }) => {
                         </span>
                     </div>
 
-                    {isLive && liveData && liveData[instrumentKey] && (
+                    {(isLive || instrumentKey) && (
                         <div
                             style={{
                                 marginLeft: "15px",
@@ -334,14 +394,17 @@ export const OIMonitor = ({ token: propToken }) => {
                                     fontSize: "0.9rem",
                                 }}
                             >
-                                {liveData[instrumentKey].symbol || "Instrument"}
+                                {liveData?.[instrumentKey]?.symbol || "NIFTY FUT"}
                             </span>
                             <span style={{ color: "#666", fontSize: "0.8rem" }}>|</span>
                             <span
                                 style={{
-                                    color: "#aaa",
-                                    fontSize: "0.8rem",
+                                    color: "#fff",
+                                    fontSize: "0.9rem",
                                     fontFamily: "monospace",
+                                    background: "rgba(0,0,0,0.3)",
+                                    padding: "2px 6px",
+                                    borderRadius: "3px"
                                 }}
                             >
                                 {instrumentKey}
@@ -365,14 +428,67 @@ export const OIMonitor = ({ token: propToken }) => {
 
                 <div className="header-right">
                     {!isLive ? (
-                        <div className="token-input-group">
+                        <div className="token-input-group" style={{ position: 'relative' }}>
+                            <div style={{ position: 'relative' }}>
+                                <input
+                                    type="text"
+                                    placeholder="Search Symbol (e.g. RELIANCE, NIFTY...)"
+                                    value={searchQuery}
+                                    onChange={(e) => handleSearch(e.target.value)}
+                                    onFocus={() => searchQuery.length >= 3 && setShowDropdown(true)}
+                                    className="token-input"
+                                    style={{ width: "220px", paddingRight: isSearching ? "30px" : "10px" }}
+                                />
+                                {isSearching && (
+                                    <div style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)' }}>
+                                        <RefreshCw size={14} className="spinning" style={{ color: '#2962ff' }} />
+                                    </div>
+                                )}
+                                {showDropdown && searchResults.length > 0 && (
+                                    <div style={{
+                                        position: 'absolute',
+                                        top: '100%',
+                                        left: 0,
+                                        right: 0,
+                                        background: '#1a1a1a',
+                                        border: '1px solid rgba(255,255,255,0.1)',
+                                        borderRadius: '4px',
+                                        zIndex: 1000,
+                                        maxHeight: '200px',
+                                        overflowY: 'auto',
+                                        marginTop: '5px',
+                                        boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
+                                    }}>
+                                        {searchResults.map((item, idx) => (
+                                            <div
+                                                key={idx}
+                                                onClick={() => selectInstrument(item)}
+                                                style={{
+                                                    padding: '8px 12px',
+                                                    cursor: 'pointer',
+                                                    borderBottom: '1px solid rgba(255,255,255,0.05)',
+                                                    display: 'flex',
+                                                    justifyContent: 'space-between',
+                                                    fontSize: '0.85rem'
+                                                }}
+                                                onMouseEnter={(e) => e.target.style.background = 'rgba(255,255,255,0.05)'}
+                                                onMouseLeave={(e) => e.target.style.background = 'transparent'}
+                                            >
+                                                <span style={{ fontWeight: 'bold', color: '#2962ff' }}>{item.symbol}</span>
+                                                <span style={{ color: '#666', fontSize: '0.7rem' }}>{item.segment}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
                             <input
                                 type="text"
-                                placeholder="Instrument Key (e.g. NSE_FO|49229)"
+                                placeholder="Key"
                                 value={instrumentKey}
                                 onChange={(e) => setInstrumentKey(e.target.value)}
                                 className="token-input"
-                                style={{ width: "160px" }}
+                                style={{ width: "120px", background: 'rgba(255,255,255,0.05)', color: '#888' }}
+                                readOnly
                             />
                             <input
                                 type="password"
@@ -412,55 +528,6 @@ export const OIMonitor = ({ token: propToken }) => {
                             </button>
                         </div>
                     )}
-                    <button
-                        onClick={async () => {
-                            try {
-                                const res = await fetch(
-                                    "http://localhost:3000/api/tools/find-nifty-future",
-                                );
-                                const data = await res.json();
-
-                                if (data.status === "info") {
-                                    let msg = `${data.message}\n\n`;
-                                    msg += `🚀 Common Keys:\n`;
-                                    data.common_keys.forEach(
-                                        (k) => (msg += `- ${k.symbol}: ${k.key}\n`),
-                                    );
-                                    msg += `\n📋 Instructions:\n`;
-                                    data.instructions.forEach((i) => (msg += `${i}\n`));
-                                    alert(msg);
-                                } else if (data.data) {
-                                    console.log("--- Active Nifty Futures ---");
-                                    data.data.forEach((f) => {
-                                        console.log(
-                                            `${f.trading_symbol} (${f.expiry}): ${f.instrument_key}`,
-                                        );
-                                    });
-                                    alert(
-                                        `Check Console for Keys!\nCurrent Configured Key: ${instrumentKey}`,
-                                    );
-                                } else {
-                                    alert(
-                                        "Error fetching keys: " + (data.error || "Unknown error"),
-                                    );
-                                }
-                            } catch (e) {
-                                alert("Failed to fetch keys. Ensure Proxy Server is running.");
-                                console.error(e);
-                            }
-                        }}
-                        style={{
-                            padding: "10px",
-                            background: "rgba(255,255,255,0.1)",
-                            border: "1px solid rgba(255,255,255,0.2)",
-                            borderRadius: "8px",
-                            cursor: "pointer",
-                            color: "#aaa",
-                        }}
-                        title="Check Active Nifty Future Keys"
-                    >
-                        🔍
-                    </button>
                 </div>
             </div>
 
@@ -469,7 +536,10 @@ export const OIMonitor = ({ token: propToken }) => {
                 <div className="stat-card">
                     <div className="stat-label">Current OI</div>
                     <div className="stat-value">{formatNumber(currentOI)}</div>
-                    <div className="stat-subtitle">Open Interest</div>
+                    <div className="stat-subtitle" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>Open Interest</span>
+                        <span style={{ color: '#2962ff', opacity: 0.8, fontSize: '0.7rem', fontWeight: 'bold' }}>{instrumentKey}</span>
+                    </div>
                 </div>
 
                 <div className="stat-card">
@@ -564,7 +634,7 @@ export const OIMonitor = ({ token: propToken }) => {
                     <div className="stat-value">{oiHistory.length}</div>
                     <div className="stat-subtitle">Captured Intervals</div>
                 </div>
-            </div>
+            </div >
 
             {/* NEW: Market Trend Analysis */}
             {/* <MarketTrendAnalysis history={oiHistory} /> */}
@@ -635,6 +705,6 @@ export const OIMonitor = ({ token: propToken }) => {
                     )}
                 </div>
             </div>
-        </div>
+        </div >
     );
 };

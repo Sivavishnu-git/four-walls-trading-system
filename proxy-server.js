@@ -3,13 +3,53 @@ import cors from "cors";
 import axios from "axios";
 import dotenv from "dotenv";
 import querystring from "querystring";
+import zlib from "zlib";
+import fs from "fs";
+import { promisify } from "util";
 import { updateEnvToken } from "./utils/tokenManager.js";
+
+const gunzip = promisify(zlib.gunzip);
 
 dotenv.config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// --- MASTER LIST CACHE ---
+const MASTER_CACHE = {
+  NSE: { data: null, lastFetched: null, url: "https://assets.upstox.com/market-quote/instruments/exchange/NSE.json.gz" },
+  NFO: { data: null, lastFetched: null, url: "https://assets.upstox.com/market-quote/instruments/exchange/NFO.json.gz" }
+};
+
+const getMasterData = async (exchange) => {
+  const cache = MASTER_CACHE[exchange];
+  if (!cache) return null;
+
+  const today = new Date().toDateString();
+  if (cache.data && cache.lastFetched === today) {
+    return cache.data;
+  }
+
+  try {
+    console.log(`📥 Downloading ${exchange} Master List...`);
+    const response = await axios.get(cache.url, {
+      responseType: 'arraybuffer',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      }
+    });
+    const decompressed = await gunzip(response.data);
+    const data = JSON.parse(decompressed.toString());
+
+    cache.data = data;
+    cache.lastFetched = today;
+    return data;
+  } catch (err) {
+    console.error(`Error fetching ${exchange} master:`, err.message);
+    return cache.data; // Fallback to old cache if exists
+  }
+};
 
 const PORT = 3000;
 const CLIENT_ID = process.env.UPSTOX_API_KEY;
@@ -154,41 +194,72 @@ app.get("/api/historical", async (req, res) => {
   }
 });
 
-// Tool Endpoint: Find Nifty Future Keys
-app.get("/api/tools/find-nifty-future", async (req, res) => {
+// Tool Endpoint: Auto-Discover Recent Nifty Future Key using NFO Master List
+app.get("/api/tools/discover-nifty-future", async (req, res) => {
   try {
-    console.log(
-      "Upstox Search API is currently unavailable via direct endpoint.",
+    const instruments = await getMasterData("NFO");
+    if (!instruments) return res.status(500).json({ error: "Could not load NFO master list" });
+
+    // Filter for NIFTY Futures
+    const niftyFutures = instruments.filter(
+      (i) => i.name === "NIFTY" && i.instrument_type === "FUT"
     );
 
-    // Provide helpful instructions and some common keys
+    if (niftyFutures.length === 0) {
+      return res.status(404).json({ error: "No Nifty Futures found in master list" });
+    }
+
+    // Sort by expiry to get the nearest one
+    niftyFutures.sort((a, b) => new Date(a.expiry) - new Date(b.expiry));
+
+    const currentFuture = niftyFutures[0];
+    console.log("✅ Discovered Current Future:", currentFuture.trading_symbol, currentFuture.instrument_key);
+
     res.json({
-      status: "info",
-      message:
-        "Direct instrument search is currently limited. Please use the Upstox Developer Console or Terminal to find the exact instrument key.",
-      help: 'The instrument key for Nifty Futures usually starts with "NSE_FO|".',
-      common_keys: [
-        {
-          symbol: "NIFTY FEB FUT",
-          key: "NSE_FO|49229",
-          note: "Typical Feb 2026 Key",
-        },
-        {
-          symbol: "NIFTY MAR FUT",
-          key: "NSE_FO|49242",
-          note: "Typical Mar 2026 Key",
-        },
-      ],
-      instructions: [
-        "1. Go to Upstox Developer Console",
-        "2. Download the NSE Instrument Master JSON",
-        '3. Search for "NIFTY" with segment "NSE_FO" and type "FUT"',
-        "4. Update VITE_INSTRUMENT_KEY in your .env file",
-      ],
+      status: "success",
+      data: currentFuture
     });
   } catch (error) {
-    console.error("Tool Error:", error.message);
-    res.status(500).json({ error: error.message });
+    console.error("Discovery Error:", error.message);
+    res.status(500).json({ error: "Failed to discover instruments: " + error.message });
+  }
+});
+
+// Tool Endpoint: Universal Instrument Search (Master List based)
+app.get("/api/tools/search-master", async (req, res) => {
+  try {
+    const { query } = req.query;
+    if (!query || query.length < 2) return res.json({ status: "success", data: [] });
+
+    const searchTerm = query.toUpperCase();
+
+    // Load both NSE and NFO
+    const [nseData, nfoData] = await Promise.all([
+      getMasterData("NSE"),
+      getMasterData("NFO")
+    ]);
+
+    const allInstruments = [...(nseData || []), ...(nfoData || [])];
+
+    const results = allInstruments
+      .filter(i =>
+        (i.trading_symbol && i.trading_symbol.includes(searchTerm)) ||
+        (i.name && i.name.toUpperCase().includes(searchTerm))
+      )
+      .slice(0, 15) // Performance limit
+      .map(i => ({
+        symbol: i.trading_symbol,
+        key: i.instrument_key,
+        name: i.name,
+        expiry: i.expiry,
+        type: i.instrument_type,
+        segment: i.segment
+      }));
+
+    res.json({ status: "success", data: results });
+  } catch (err) {
+    console.error("Master Search Error:", err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
