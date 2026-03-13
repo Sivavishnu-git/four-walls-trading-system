@@ -5,6 +5,8 @@ import dotenv from "dotenv";
 import querystring from "querystring";
 import zlib from "zlib";
 import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 import { promisify } from "util";
 import { updateEnvToken } from "./utils/tokenManager.js";
 
@@ -58,7 +60,10 @@ const CLIENT_ID = process.env.UPSTOX_API_KEY;
 const CLIENT_SECRET = process.env.UPSTOX_API_SECRET;
 const REDIRECT_URI =
   process.env.UPSTOX_REDIRECT_URI || "http://localhost:3000/api/auth/callback";
-const FRONTEND_URI = "http://localhost:5173";
+const IS_PROD = process.env.NODE_ENV === "production";
+const FRONTEND_URI = IS_PROD
+  ? (process.env.FRONTEND_URI || `http://localhost:${PORT}`)
+  : "http://localhost:5173";
 
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
@@ -355,7 +360,7 @@ app.post("/api/order/place", async (req, res) => {
       }
     }
 
-    const targetUrl = "https://api-v2.upstox.com/order/place";
+    const targetUrl = "https://api.upstox.com/v2/order/place";
     console.log("Placing Order:", JSON.stringify(orderData, null, 2));
 
     const response = await axios.post(targetUrl, orderData, {
@@ -385,7 +390,7 @@ app.put("/api/order/modify", async (req, res) => {
       return res.status(400).json({ error: "Missing Authorization Header" });
     }
 
-    const targetUrl = "https://api-v2.upstox.com/order/modify";
+    const targetUrl = "https://api.upstox.com/v2/order/modify";
     console.log("Modifying Order:", JSON.stringify(req.body, null, 2));
 
     const response = await axios.put(targetUrl, req.body, {
@@ -424,7 +429,7 @@ app.delete("/api/order/cancel", async (req, res) => {
       return res.status(400).json({ error: "Missing order_id parameter" });
     }
 
-    const targetUrl = `https://api-v2.upstox.com/order/cancel?order_id=${order_id}`;
+    const targetUrl = `https://api.upstox.com/v2/order/cancel?order_id=${order_id}`;
     console.log("Canceling Order:", order_id);
 
     const response = await axios.delete(targetUrl, {
@@ -457,7 +462,7 @@ app.get("/api/order/book", async (req, res) => {
       return res.status(400).json({ error: "Missing Authorization Header" });
     }
 
-    const targetUrl = "https://api-v2.upstox.com/order/retrieve-all";
+    const targetUrl = "https://api.upstox.com/v2/order/retrieve-all";
     console.log("Fetching Order Book");
 
     const response = await axios.get(targetUrl, {
@@ -486,7 +491,7 @@ app.get("/api/order/today", async (req, res) => {
       return res.status(400).json({ error: "Missing Authorization Header" });
     }
 
-    const targetUrl = "https://api-v2.upstox.com/order/retrieve-all";
+    const targetUrl = "https://api.upstox.com/v2/order/retrieve-all";
     console.log("Fetching Today's Orders");
 
     const response = await axios.get(targetUrl, {
@@ -569,7 +574,7 @@ app.get("/api/portfolio/positions", async (req, res) => {
     }
 
     const targetUrl =
-      "https://api-v2.upstox.com/portfolio/short-term-positions";
+      "https://api.upstox.com/v2/portfolio/short-term-positions";
     console.log("Fetching Positions");
 
     const response = await axios.get(targetUrl, {
@@ -586,6 +591,104 @@ app.get("/api/portfolio/positions", async (req, res) => {
     res
       .status(error.response ? error.response.status : 500)
       .json(error.response ? error.response.data : { error: "Proxy Error" });
+  }
+});
+
+// ATM Options for Order Placement
+app.get("/api/atm-options", async (req, res) => {
+  try {
+    const accessToken = req.headers.authorization;
+    if (!accessToken) return res.status(400).json({ error: "Missing Authorization Header" });
+
+    const instruments = await getMasterData("NFO");
+    if (!instruments) return res.status(500).json({ error: "Could not load master list" });
+
+    const niftyFutures = instruments.filter(i => i.name === "NIFTY" && i.instrument_type === "FUT");
+    niftyFutures.sort((a, b) => a.expiry - b.expiry);
+    const currentFuture = niftyFutures[0];
+    if (!currentFuture) return res.status(404).json({ error: "No Nifty Future found" });
+
+    const futKey = currentFuture.instrument_key;
+    const futRes = await axios.get(
+      `https://api.upstox.com/v2/market-quote/quotes?instrument_key=${encodeURIComponent(futKey)}`,
+      { headers: { Authorization: accessToken, Accept: "application/json" } }
+    );
+
+    let spotPrice = 0;
+    if (futRes.data?.data) {
+      const q = Object.values(futRes.data.data).find(q => q.instrument_token === futKey);
+      if (q) spotPrice = q.last_price || 0;
+    }
+    if (!spotPrice) return res.status(500).json({ error: "Could not get Nifty Future price" });
+
+    const atm = Math.round(spotPrice / 50) * 50;
+    const nearStrikes = [atm - 100, atm - 50, atm, atm + 50, atm + 100];
+
+    const niftyOptions = instruments.filter(
+      i => i.name === "NIFTY" && (i.instrument_type === "CE" || i.instrument_type === "PE")
+    );
+    const expiries = [...new Set(niftyOptions.map(o => o.expiry))].sort((a, b) => a - b);
+    const nearestExpiry = expiries[0];
+    const expiryOpts = niftyOptions.filter(o => o.expiry === nearestExpiry);
+
+    const optKeys = [];
+    const optMeta = {};
+    for (const strike of nearStrikes) {
+      const ce = expiryOpts.find(o => o.strike_price === strike && o.instrument_type === "CE");
+      const pe = expiryOpts.find(o => o.strike_price === strike && o.instrument_type === "PE");
+      if (ce) {
+        optKeys.push(ce.instrument_key);
+        optMeta[ce.instrument_key] = { strike, type: "CE", symbol: ce.trading_symbol, lot_size: ce.lot_size || 25 };
+      }
+      if (pe) {
+        optKeys.push(pe.instrument_key);
+        optMeta[pe.instrument_key] = { strike, type: "PE", symbol: pe.trading_symbol, lot_size: pe.lot_size || 25 };
+      }
+    }
+
+    const options = [];
+    if (optKeys.length > 0) {
+      const oRes = await axios.get(
+        `https://api.upstox.com/v2/market-quote/quotes?instrument_key=${encodeURIComponent(optKeys.join(","))}`,
+        { headers: { Authorization: accessToken, Accept: "application/json" } }
+      );
+      if (oRes.data?.data) {
+        for (const [, q] of Object.entries(oRes.data.data)) {
+          const meta = optMeta[q.instrument_token];
+          if (!meta) continue;
+          options.push({
+            instrument_key: q.instrument_token,
+            strike: meta.strike,
+            type: meta.type,
+            symbol: meta.symbol,
+            lot_size: meta.lot_size,
+            ltp: q.last_price || 0,
+            oi: q.oi || 0,
+            volume: q.volume || 0,
+            change: q.net_change || 0,
+            bid: q.depth?.buy?.[0]?.price || 0,
+            ask: q.depth?.sell?.[0]?.price || 0,
+          });
+        }
+      }
+    }
+
+    options.sort((a, b) => a.strike === b.strike ? (a.type === "CE" ? -1 : 1) : a.strike - b.strike);
+
+    res.json({
+      status: "success",
+      data: {
+        spot_price: spotPrice,
+        atm_strike: atm,
+        expiry: nearestExpiry,
+        expiry_date: new Date(nearestExpiry).toLocaleDateString("en-IN"),
+        future: { key: futKey, symbol: currentFuture.trading_symbol },
+        options,
+      },
+    });
+  } catch (error) {
+    console.error("ATM Options Error:", error.message);
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -847,6 +950,19 @@ app.get("/api/trade-setup", async (req, res) => {
   }
 });
 
+// In production, serve the built React frontend
+if (IS_PROD) {
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const distPath = path.join(__dirname, "dist");
+  if (fs.existsSync(distPath)) {
+    app.use(express.static(distPath));
+    app.get("*", (req, res) => {
+      res.sendFile(path.join(distPath, "index.html"));
+    });
+    console.log("Serving static frontend from dist/");
+  }
+}
+
 app.listen(PORT, () => {
-  console.log(`Proxy Server V3 running on http://localhost:${PORT}`);
+  console.log(`Proxy Server V3 running on http://localhost:${PORT} [${IS_PROD ? "PRODUCTION" : "DEVELOPMENT"}]`);
 });

@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from "react";
-import { Activity, BarChart3, LogIn, Target, Crosshair } from "lucide-react";
+import { API_BASE, AUTH_LOGIN_URL } from "./config";
+import { Activity, BarChart3, LogIn, Target, Crosshair, ShoppingCart } from "lucide-react";
 import { OIMonitor } from "./components/OIMonitor";
 import { HistoricalData } from "./components/HistoricalData";
 import { OptionChain } from "./components/OptionChain";
 import { TradeSetup } from "./components/TradeSetup";
+import { OrderPanel } from "./components/OrderPanel";
 
 function App() {
   const [accessToken, setAccessToken] = useState(() => {
@@ -28,7 +30,7 @@ function App() {
   const [page, setPage] = useState("oi");
 
   useEffect(() => {
-    fetch("http://localhost:3000/api/tools/discover-nifty-future")
+    fetch(`${API_BASE}/api/tools/discover-nifty-future`)
       .then((r) => r.json())
       .then((json) => {
         if (json.status === "success" && json.data?.instrument_key) {
@@ -40,7 +42,7 @@ function App() {
   }, []);
 
   const handleLogin = () => {
-    window.location.href = "http://localhost:3000/api/auth/login";
+    window.location.href = AUTH_LOGIN_URL;
   };
 
   const tokenExpired = !accessToken || accessToken.length < 20;
@@ -84,6 +86,9 @@ function App() {
           <button onClick={() => setPage("tradesetup")} style={tabStyle("tradesetup", "#2962ff")}>
             <Crosshair size={16} /> Trade Setup
           </button>
+          <button onClick={() => setPage("orders")} style={tabStyle("orders", "#ff9800")}>
+            <ShoppingCart size={16} /> Orders
+          </button>
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
@@ -126,6 +131,9 @@ function App() {
         </div>
         <div style={{ display: page === "tradesetup" ? "block" : "none", height: "100%", overflow: "auto" }}>
           <TradeSetup token={accessToken} />
+        </div>
+        <div style={{ display: page === "orders" ? "block" : "none", height: "100%", overflow: "auto" }}>
+          <OrderPanel token={accessToken} />
         </div>
       </div>
     </div>

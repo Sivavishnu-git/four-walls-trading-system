@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { API_BASE } from "../config";
 import {
   RefreshCw,
   TrendingUp,
@@ -36,7 +37,7 @@ export const OptionChain = ({ token }) => {
     setError(null);
     try {
       const res = await fetch(
-        `http://localhost:3000/api/option-chain?expiry_type=${expiryType}`,
+        `${API_BASE}/api/option-chain?expiry_type=${expiryType}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       const json = await res.json();

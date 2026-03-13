@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { API_BASE } from "../config";
 import { RefreshCw, Download, Search } from "lucide-react";
 
 export const HistoricalData = ({ token, instrumentKey: propInstrumentKey }) => {
@@ -19,7 +20,7 @@ export const HistoricalData = ({ token, instrumentKey: propInstrumentKey }) => {
         clearTimeout(searchTimeout.current);
         searchTimeout.current = setTimeout(async () => {
             try {
-                const res = await fetch(`http://localhost:3000/api/tools/search-master?query=${encodeURIComponent(searchQuery)}`);
+                const res = await fetch(`${API_BASE}/api/tools/search-master?query=${encodeURIComponent(searchQuery)}`);
                 const json = await res.json();
                 if (json.status === "success") setSearchResults(json.data || []);
             } catch { /* ignore */ }
@@ -45,7 +46,7 @@ export const HistoricalData = ({ token, instrumentKey: propInstrumentKey }) => {
         setLoading(true);
         setError(null);
         try {
-            const url = `http://localhost:3000/api/historical?instrument_key=${encodeURIComponent(instrumentKey)}&interval=${interval}&to_date=${toDate}&from_date=${fromDate}`;
+            const url = `${API_BASE}/api/historical?instrument_key=${encodeURIComponent(instrumentKey)}&interval=${interval}&to_date=${toDate}&from_date=${fromDate}`;
             const res = await fetch(url, {
                 headers: { Authorization: `Bearer ${token}` },
             });
