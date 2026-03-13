@@ -133,8 +133,31 @@ pnpm-lock.yaml
 # ============================================
 # Trading Specific Files
 # ============================================
-# Large instrument data files (keep NSE.json in repo for now, but can exclude if too large)
-# docs/NSE.json
+# Instrument data dumps
+*.json.gz
+SCANNED_INSTRUMENTS.json
+
+# Debug and test scripts
+debug_*.js
+check_*.js
+find_*.js
+format_*.js
+guess_*.js
+scan_*.js
+test_*.js
+
+# Batch/shell scripts (OS-specific helpers)
+*.bat
+*.sh
+!gradlew
+
+# Deployment configs (not currently used)
+Procfile
+railway.json
+render.yaml
+
+# Standalone server (use proxy-server.js instead)
+server.js
 
 # Trading logs and history
 trading_logs/
@@ -147,7 +170,7 @@ trade_history/
 *.bak
 backups/
 
-# Database files (if you add any)
+# Database files
 *.db
 *.sqlite
 *.sqlite3
