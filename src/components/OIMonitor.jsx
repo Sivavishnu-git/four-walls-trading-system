@@ -11,7 +11,7 @@ import { useUpstoxPolling } from "../hooks/useUpstoxPolling";
 // import { MarketTrendAnalysis } from './MarketTrendAnalysis';
 // import { OptionEntryPlanner } from './OptionEntryPlanner';
 
-export const OIMonitor = ({ token: propToken }) => {
+export const OIMonitor = ({ token: propToken, instrumentKey: propInstrumentKey }) => {
     const [token, setToken] = useState(
         propToken ||
         localStorage.getItem("upstox_access_token") ||
@@ -21,14 +21,13 @@ export const OIMonitor = ({ token: propToken }) => {
     const [showTokenInput, setShowTokenInput] = useState(false);
     const [isLive, setIsLive] = useState(false);
 
-    // Sync token from props
     useEffect(() => {
         if (propToken) setToken(propToken);
     }, [propToken]);
     const [oiHistory, setOiHistory] = useState([]);
     const [currentOI, setCurrentOI] = useState(null);
     const [oiChange, setOiChange] = useState(null);
-    const [oiTrend5Min, setOiTrend5Min] = useState(null); // 'increasing', 'decreasing', 'neutral'
+    const [oiTrend5Min, setOiTrend5Min] = useState(null);
     const [lastUpdate, setLastUpdate] = useState(null);
     const [initialOIChange, setInitialOIChange] = useState(() => {
         const saved = localStorage.getItem("oi_initial_offset");
@@ -37,10 +36,13 @@ export const OIMonitor = ({ token: propToken }) => {
     const firstSessionOIRef = useRef(null);
     const intervalRef = useRef(null);
 
-    // Nifty Future instrument key (Current Month Future - Has OI data)
     const [instrumentKey, setInstrumentKey] = useState(
-        import.meta.env.VITE_INSTRUMENT_KEY || "NSE_FO|59182",
+        propInstrumentKey || import.meta.env.VITE_INSTRUMENT_KEY || "NSE_FO|51714",
     );
+
+    useEffect(() => {
+        if (propInstrumentKey) setInstrumentKey(propInstrumentKey);
+    }, [propInstrumentKey]);
 
 
     const [searchQuery, setSearchQuery] = useState("");
