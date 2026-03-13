@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { API_BASE } from "../config";
 
 /**
  * useUpstoxPolling Hook
@@ -23,7 +24,7 @@ export const useUpstoxPolling = (accessToken, instrumentKeys = [], interval = 20
             const cleanToken = accessToken.replace(/^Bearer\s+/i, "").trim();
             const keysParam = instrumentKeys.join(",");
 
-            const response = await fetch(`http://localhost:3000/api/quotes?instrument_keys=${encodeURIComponent(keysParam)}`, {
+            const response = await fetch(`${API_BASE}/api/quotes?instrument_keys=${encodeURIComponent(keysParam)}`, {
                 headers: {
                     "Authorization": `Bearer ${cleanToken}`,
                     "Accept": "application/json"

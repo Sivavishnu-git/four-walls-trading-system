@@ -1,0 +1,314 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  LiveTrading App - EC2 deployment with Nginx reverse proxy,
+  Node.js backend (PM2), and React frontend.
+
+Parameters:
+  InstanceType:
+    Type: String
+    Default: t2.micro
+    AllowedValues: [t2.micro, t3.micro, t3.small]
+    Description: EC2 instance type (t2.micro is free-tier eligible)
+
+  KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Existing EC2 Key Pair for SSH access
+
+  GitRepoURL:
+    Type: String
+    Default: https://github.com/Sivavishnu-git/four-walls-trading-system.git
+    Description: Git repository URL to clone
+
+  GitBranch:
+    Type: String
+    Default: main
+    Description: Git branch to deploy
+
+  UpstoxAPIKey:
+    Type: String
+    NoEcho: true
+    Description: Upstox API Key (Client ID)
+
+  UpstoxAPISecret:
+    Type: String
+    NoEcho: true
+    Description: Upstox API Secret
+
+  AllowedSSHCidr:
+    Type: String
+    Default: 0.0.0.0/0
+    Description: CIDR block allowed for SSH access (restrict to your IP for security)
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label: { default: "EC2 Configuration" }
+        Parameters: [InstanceType, KeyPairName, AllowedSSHCidr]
+      - Label: { default: "Application" }
+        Parameters: [GitRepoURL, GitBranch]
+      - Label: { default: "Upstox API Credentials" }
+        Parameters: [UpstoxAPIKey, UpstoxAPISecret]
+
+Resources:
+  # --- VPC & Networking (uses default VPC) ---
+
+  ElasticIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: LiveTrading-EIP
+
+  EIPAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt ElasticIP.AllocationId
+      InstanceId: !Ref EC2Instance
+
+  # --- Security Group ---
+
+  AppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: LiveTrading App - HTTP, HTTPS, SSH
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref AllowedSSHCidr
+          Description: SSH access
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS
+      Tags:
+        - Key: Name
+          Value: LiveTrading-SG
+
+  # --- IAM Role (CloudWatch Logs, SSM access) ---
+
+  EC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: LiveTrading-EC2-Role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Tags:
+        - Key: Name
+          Value: LiveTrading-Role
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref EC2Role
+
+  # --- EC2 Instance ---
+
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyPairName
+      SecurityGroupIds:
+        - !GetAtt AppSecurityGroup.GroupId
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      ImageId: !FindInMap [RegionAMI, !Ref "AWS::Region", AMI]
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 20
+            VolumeType: gp3
+            DeleteOnTermination: true
+      Tags:
+        - Key: Name
+          Value: LiveTrading-Server
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euxo pipefail
+          exec > /var/log/user-data.log 2>&1
+
+          echo "========== SYSTEM SETUP =========="
+          apt-get update -y
+          apt-get upgrade -y
+          apt-get install -y curl git nginx
+
+          # Node.js 20 LTS
+          curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+          apt-get install -y nodejs
+
+          # PM2
+          npm install -g pm2
+
+          echo "========== CLONE REPO =========="
+          cd /home/ubuntu
+          git clone -b ${GitBranch} ${GitRepoURL} app
+          cd app
+
+          # Create .env
+          cat > .env << 'ENVEOF'
+          UPSTOX_API_KEY=${UpstoxAPIKey}
+          UPSTOX_API_SECRET=${UpstoxAPISecret}
+          UPSTOX_REDIRECT_URI=http://PLACEHOLDER/api/auth/callback
+          VITE_UPSTOX_ACCESS_TOKEN=
+          VITE_INSTRUMENT_KEY=
+          NODE_ENV=production
+          PORT=3000
+          ENVEOF
+
+          # Install dependencies
+          npm install
+
+          # Build React frontend
+          npm run build
+
+          # Set ownership
+          chown -R ubuntu:ubuntu /home/ubuntu/app
+
+          echo "========== NGINX CONFIG =========="
+          cat > /etc/nginx/sites-available/livetrading << 'NGINXEOF'
+          server {
+              listen 80 default_server;
+              server_name _;
+
+              root /home/ubuntu/app/dist;
+              index index.html;
+
+              # Gzip
+              gzip on;
+              gzip_types text/plain text/css application/json application/javascript text/xml;
+              gzip_min_length 256;
+
+              # API reverse proxy
+              location /api/ {
+                  proxy_pass http://127.0.0.1:3000;
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection 'upgrade';
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+                  proxy_cache_bypass $http_upgrade;
+                  proxy_read_timeout 120s;
+              }
+
+              # Frontend SPA
+              location / {
+                  try_files $uri $uri/ /index.html;
+              }
+
+              # Cache static assets
+              location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff2?)$ {
+                  expires 7d;
+                  add_header Cache-Control "public, immutable";
+              }
+          }
+          NGINXEOF
+
+          rm -f /etc/nginx/sites-enabled/default
+          ln -sf /etc/nginx/sites-available/livetrading /etc/nginx/sites-enabled/
+          nginx -t
+          systemctl restart nginx
+          systemctl enable nginx
+
+          echo "========== START APP WITH PM2 =========="
+          cd /home/ubuntu/app
+          sudo -u ubuntu pm2 start proxy-server.js --name livetrading --env production
+          sudo -u ubuntu pm2 save
+          sudo -u ubuntu pm2 startup systemd -u ubuntu --hp /home/ubuntu | tail -1 | bash
+
+          echo "========== UPDATE REDIRECT URI =========="
+          # Get the Elastic IP (will be assigned after instance creation)
+          TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 60")
+          PUBLIC_IP=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/public-ipv4)
+          sed -i "s|PLACEHOLDER|$PUBLIC_IP|g" /home/ubuntu/app/.env
+
+          # Restart app with correct redirect URI
+          sudo -u ubuntu pm2 restart livetrading
+
+          echo "========== DEPLOYMENT COMPLETE =========="
+          echo "App available at: http://$PUBLIC_IP"
+
+  # --- CloudWatch Alarm (optional monitoring) ---
+
+  CPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: LiveTrading-HighCPU
+      AlarmDescription: Alert if CPU exceeds 80% for 5 minutes
+      Namespace: AWS/EC2
+      MetricName: CPUUtilization
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: InstanceId
+          Value: !Ref EC2Instance
+
+# --- AMI Mapping (Ubuntu 22.04 LTS) ---
+
+Mappings:
+  RegionAMI:
+    us-east-1:
+      AMI: ami-0c7217cdde317cfec
+    us-east-2:
+      AMI: ami-05fb0b8c1424f266b
+    us-west-1:
+      AMI: ami-0ce2cb35386fc22e9
+    us-west-2:
+      AMI: ami-008fe2fc65df48dac
+    ap-south-1:
+      AMI: ami-0f5ee92e2d63afc18
+    ap-southeast-1:
+      AMI: ami-078c1149d8ad719a7
+    ap-southeast-2:
+      AMI: ami-04f5097681773b989
+    ap-northeast-1:
+      AMI: ami-07c589821f2b353aa
+    eu-west-1:
+      AMI: ami-0905a3c97561e0b69
+    eu-central-1:
+      AMI: ami-0faab6bdbac9486fb
+
+Outputs:
+  PublicIP:
+    Description: Elastic IP address of the server
+    Value: !Ref ElasticIP
+
+  AppURL:
+    Description: Application URL
+    Value: !Sub "http://${ElasticIP}"
+
+  SSHCommand:
+    Description: SSH command to connect
+    Value: !Sub "ssh -i <your-key>.pem ubuntu@${ElasticIP}"
+
+  UpstoxRedirectURI:
+    Description: Set this as redirect URI in Upstox Developer Console
+    Value: !Sub "http://${ElasticIP}/api/auth/callback"
+
+  PostDeployNote:
+    Description: Important post-deployment steps
+    Value: >
+      1) Update Upstox redirect URI in developer console to the URL above.
+      2) SSH in and verify: pm2 status, curl http://localhost:3000/api/tools/discover-nifty-future.
+      3) Open the App URL in browser and click Login to authorize.

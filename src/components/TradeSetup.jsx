@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { API_BASE } from "../config";
 import {
   RefreshCw, TrendingUp, TrendingDown, Activity, Target,
   ArrowUpCircle, ArrowDownCircle, Crosshair, Zap, Shield,
@@ -164,7 +165,7 @@ export const TradeSetup = ({ token }) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("http://localhost:3000/api/trade-setup", {
+      const res = await fetch(`${API_BASE}/api/trade-setup`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const json = await res.json();

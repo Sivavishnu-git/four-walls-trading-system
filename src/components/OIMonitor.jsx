@@ -8,6 +8,7 @@ import {
     Unlock,
 } from "lucide-react";
 import { useUpstoxPolling } from "../hooks/useUpstoxPolling";
+import { API_BASE } from "../config";
 // import { MarketTrendAnalysis } from './MarketTrendAnalysis';
 // import { OptionEntryPlanner } from './OptionEntryPlanner';
 
@@ -61,7 +62,7 @@ export const OIMonitor = ({ token: propToken, instrumentKey: propInstrumentKey }
         setIsSearching(true);
         setShowDropdown(true);
         try {
-            const res = await fetch(`http://localhost:3000/api/tools/search-master?query=${query}`);
+            const res = await fetch(`${API_BASE}/api/tools/search-master?query=${query}`);
             const result = await res.json();
             if (result.status === "success") {
                 setSearchResults(result.data);
@@ -233,7 +234,7 @@ export const OIMonitor = ({ token: propToken, instrumentKey: propInstrumentKey }
 
                 console.log(`Fetching history for Previous OI: ${instrumentKey}`);
                 const response = await fetch(
-                    `http://localhost:3000/api/historical?instrument_key=${encodeURIComponent(instrumentKey)}&interval=day&to_date=${today}&from_date=${fiveDaysAgo}`,
+                    `${API_BASE}/api/historical?instrument_key=${encodeURIComponent(instrumentKey)}&interval=day&to_date=${today}&from_date=${fiveDaysAgo}`,
                     {
                         headers: { Authorization: `Bearer ${token}` },
                     },
