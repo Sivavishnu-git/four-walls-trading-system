@@ -152,7 +152,7 @@ const generateTradeSignal = (trend, phase, position, atmOI, ltp, pivots) => {
   return signals;
 };
 
-export const TradeSetup = ({ token }) => {
+export const TradeSetup = ({ token, replayActive }) => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -165,7 +165,8 @@ export const TradeSetup = ({ token }) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/trade-setup`, {
+      const endpoint = replayActive ? `${API_BASE}/api/replay/trade-setup` : `${API_BASE}/api/trade-setup`;
+      const res = await fetch(endpoint, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const json = await res.json();
@@ -180,7 +181,7 @@ export const TradeSetup = ({ token }) => {
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, replayActive]);
 
   useEffect(() => { fetchSetup(); }, []);
 
