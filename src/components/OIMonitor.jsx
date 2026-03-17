@@ -4,8 +4,6 @@ import {
     TrendingDown,
     Activity,
     RefreshCw,
-    Lock,
-    Unlock,
 } from "lucide-react";
 import { useUpstoxPolling } from "../hooks/useUpstoxPolling";
 import { API_BASE } from "../config";
@@ -19,7 +17,6 @@ export const OIMonitor = ({ token: propToken, instrumentKey: propInstrumentKey }
         import.meta.env.VITE_UPSTOX_ACCESS_TOKEN ||
         "",
     );
-    const [showTokenInput, setShowTokenInput] = useState(false);
     const [isLive, setIsLive] = useState(false);
 
     useEffect(() => {
@@ -44,53 +41,6 @@ export const OIMonitor = ({ token: propToken, instrumentKey: propInstrumentKey }
     useEffect(() => {
         if (propInstrumentKey) setInstrumentKey(propInstrumentKey);
     }, [propInstrumentKey]);
-
-
-    const [searchQuery, setSearchQuery] = useState("");
-    const [searchResults, setSearchResults] = useState([]);
-    const [isSearching, setIsSearching] = useState(false);
-    const [showDropdown, setShowDropdown] = useState(false);
-
-    const handleSearch = async (query) => {
-        setSearchQuery(query);
-        if (query.length < 3) {
-            setSearchResults([]);
-            setShowDropdown(false);
-            return;
-        }
-
-        setIsSearching(true);
-        setShowDropdown(true);
-        try {
-            const res = await fetch(`${API_BASE}/api/tools/search-master?query=${query}`);
-            const result = await res.json();
-            if (result.status === "success") {
-                setSearchResults(result.data);
-            }
-        } catch (err) {
-            console.error("Search failed:", err);
-        } finally {
-            setIsSearching(false);
-        }
-    };
-
-    const selectInstrument = (item) => {
-        setInstrumentKey(item.key);
-        setSearchQuery(item.symbol);
-        setShowDropdown(false);
-        setSearchResults([]);
-    };
-
-    // Close dropdown when clicking outside
-    useEffect(() => {
-        const handleClickOutside = (event) => {
-            if (!event.target.closest('.token-input-group')) {
-                setShowDropdown(false);
-            }
-        };
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, []);
 
     const {
         connect,
@@ -431,99 +381,12 @@ export const OIMonitor = ({ token: propToken, instrumentKey: propInstrumentKey }
 
                 <div className="header-right">
                     {!isLive ? (
-                        <div className="token-input-group" style={{ position: 'relative' }}>
-                            <div style={{ position: 'relative' }}>
-                                <input
-                                    type="text"
-                                    placeholder="Search Symbol (e.g. RELIANCE, NIFTY...)"
-                                    value={searchQuery}
-                                    onChange={(e) => handleSearch(e.target.value)}
-                                    onFocus={() => searchQuery.length >= 3 && setShowDropdown(true)}
-                                    className="token-input"
-                                    style={{ width: "220px", paddingRight: isSearching ? "30px" : "10px" }}
-                                />
-                                {isSearching && (
-                                    <div style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)' }}>
-                                        <RefreshCw size={14} className="spinning" style={{ color: '#2962ff' }} />
-                                    </div>
-                                )}
-                                {showDropdown && searchResults.length > 0 && (
-                                    <div style={{
-                                        position: 'absolute',
-                                        top: '100%',
-                                        left: 0,
-                                        right: 0,
-                                        background: '#1a1a1a',
-                                        border: '1px solid rgba(255,255,255,0.1)',
-                                        borderRadius: '4px',
-                                        zIndex: 1000,
-                                        maxHeight: '200px',
-                                        overflowY: 'auto',
-                                        marginTop: '5px',
-                                        boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
-                                    }}>
-                                        {searchResults.map((item, idx) => (
-                                            <div
-                                                key={idx}
-                                                onClick={() => selectInstrument(item)}
-                                                style={{
-                                                    padding: '8px 12px',
-                                                    cursor: 'pointer',
-                                                    borderBottom: '1px solid rgba(255,255,255,0.05)',
-                                                    display: 'flex',
-                                                    justifyContent: 'space-between',
-                                                    fontSize: '0.85rem'
-                                                }}
-                                                onMouseEnter={(e) => e.target.style.background = 'rgba(255,255,255,0.05)'}
-                                                onMouseLeave={(e) => e.target.style.background = 'transparent'}
-                                            >
-                                                <span style={{ fontWeight: 'bold', color: '#2962ff' }}>{item.symbol}</span>
-                                                <span style={{ color: '#666', fontSize: '0.7rem' }}>{item.segment}</span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                            <input
-                                type="text"
-                                placeholder="Key"
-                                value={instrumentKey}
-                                onChange={(e) => setInstrumentKey(e.target.value)}
-                                className="token-input"
-                                style={{ width: "120px", background: 'rgba(255,255,255,0.05)', color: '#888' }}
-                                readOnly
-                            />
-                            <input
-                                type="password"
-                                placeholder="Upstox Access Token"
-                                value={token}
-                                onChange={(e) => setToken(e.target.value)}
-                                className="token-input"
-                            />
-                            <input
-                                type="number"
-                                placeholder="Initial OI Change"
-                                value={initialOIChange}
-                                onChange={(e) =>
-                                    setInitialOIChange(Number(e.target.value))
-                                }
-                                className="token-input"
-                                style={{ width: "120px" }}
-                                title="Starting OI Change (Offset)"
-                            />
-                            <button onClick={handleConnect} className="connect-btn">
-                                Connect
-                            </button>
-                        </div>
+                        <button onClick={handleConnect} className="connect-btn">
+                            Connect
+                        </button>
                     ) : (
                         <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-                            <div
-                                style={{
-                                    fontSize: "0.8rem",
-                                    color: "#888",
-                                    paddingRight: "10px",
-                                }}
-                            >
+                            <div style={{ fontSize: "0.8rem", color: "#888", paddingRight: "10px" }}>
                                 Base Offset: {formatNumber(initialOIChange)}
                             </div>
                             <button onClick={handleDisconnect} className="disconnect-btn">

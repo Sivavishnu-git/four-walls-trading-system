@@ -1,11 +1,33 @@
 import React, { useState, useEffect } from "react";
 import { API_BASE, AUTH_LOGIN_URL } from "./config";
-import { Activity, BarChart3, LogIn, Target, Crosshair, ShoppingCart } from "lucide-react";
+import { Activity, BarChart3, LogIn, Target, Crosshair, ShoppingCart, TrendingUp } from "lucide-react";
 import { OIMonitor } from "./components/OIMonitor";
 import { HistoricalData } from "./components/HistoricalData";
 import { OptionChain } from "./components/OptionChain";
 import { TradeSetup } from "./components/TradeSetup";
 import { OrderPanel } from "./components/OrderPanel";
+import { ReplayController } from "./components/ReplayController";
+import { TradingViewChart } from "./components/TradingViewChart";
+
+class TabErrorBoundary extends React.Component {
+  state = { hasError: false, error: null };
+  static getDerivedStateFromError(error) { return { hasError: true, error }; }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: "40px", textAlign: "center", color: "#ef5350" }}>
+          <h3>Something went wrong in this tab</h3>
+          <pre style={{ fontSize: "0.8rem", color: "#888", whiteSpace: "pre-wrap" }}>{this.state.error?.message}</pre>
+          <button onClick={() => this.setState({ hasError: false, error: null })}
+            style={{ marginTop: "12px", padding: "8px 20px", background: "rgba(41,98,255,0.15)", border: "1px solid rgba(41,98,255,0.4)", color: "#2962ff", borderRadius: "6px", cursor: "pointer" }}>
+            Retry
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 function App() {
   const [accessToken, setAccessToken] = useState(() => {
@@ -28,6 +50,7 @@ function App() {
   );
   const [instrumentSymbol, setInstrumentSymbol] = useState("");
   const [page, setPage] = useState("oi");
+  const [replayState, setReplayState] = useState(null);
 
   useEffect(() => {
     fetch(`${API_BASE}/api/tools/discover-nifty-future`)
@@ -86,6 +109,9 @@ function App() {
           <button onClick={() => setPage("tradesetup")} style={tabStyle("tradesetup", "#2962ff")}>
             <Crosshair size={16} /> Trade Setup
           </button>
+          <button onClick={() => setPage("chart")} style={tabStyle("chart", "#e040fb")}>
+            <TrendingUp size={16} /> Chart
+          </button>
           <button onClick={() => setPage("orders")} style={tabStyle("orders", "#ff9800")}>
             <ShoppingCart size={16} /> Orders
           </button>
@@ -119,21 +145,28 @@ function App() {
         </div>
       </div>
 
+      <div style={{ padding: "8px 16px", flexShrink: 0, background: "#131722" }}>
+        <ReplayController token={accessToken} onReplayStateChange={setReplayState} />
+      </div>
+
       <div style={{ flex: 1, overflow: "auto", position: "relative" }}>
         <div style={{ display: page === "oi" ? "block" : "none", height: "100%", overflow: "auto" }}>
-          <OIMonitor token={accessToken} instrumentKey={instrumentKey} />
+          <TabErrorBoundary><OIMonitor token={accessToken} instrumentKey={instrumentKey} /></TabErrorBoundary>
         </div>
         <div style={{ display: page === "historical" ? "block" : "none", height: "100%", overflow: "auto" }}>
-          <HistoricalData token={accessToken} instrumentKey={instrumentKey} />
+          <TabErrorBoundary><HistoricalData token={accessToken} instrumentKey={instrumentKey} /></TabErrorBoundary>
         </div>
         <div style={{ display: page === "optionchain" ? "block" : "none", height: "100%", overflow: "auto" }}>
-          <OptionChain token={accessToken} />
+          <TabErrorBoundary><OptionChain token={accessToken} /></TabErrorBoundary>
         </div>
         <div style={{ display: page === "tradesetup" ? "block" : "none", height: "100%", overflow: "auto" }}>
-          <TradeSetup token={accessToken} />
+          <TabErrorBoundary><TradeSetup token={accessToken} replayActive={replayState?.active} /></TabErrorBoundary>
+        </div>
+        <div style={{ display: page === "chart" ? "block" : "none", height: "100%", overflow: "hidden" }}>
+          <TabErrorBoundary><TradingViewChart token={accessToken} replayActive={replayState?.active} /></TabErrorBoundary>
         </div>
         <div style={{ display: page === "orders" ? "block" : "none", height: "100%", overflow: "auto" }}>
-          <OrderPanel token={accessToken} />
+          <TabErrorBoundary><OrderPanel token={accessToken} replayActive={replayState?.active} /></TabErrorBoundary>
         </div>
       </div>
     </div>

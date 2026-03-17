@@ -178,7 +178,7 @@ export const HistoricalData = ({ token, instrumentKey: propInstrumentKey }) => {
                         onChange={(e) => setFromDate(e.target.value)}
                         style={{
                             padding: "10px 14px",
-                            background: "rgba(0,0,0,0.3)",
+                            background: "rgba(0, 0, 0, 0.3)",
                             border: "1px solid rgba(255,255,255,0.2)",
                             color: "#fff",
                             borderRadius: "8px",
