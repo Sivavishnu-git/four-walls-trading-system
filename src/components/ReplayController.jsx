@@ -27,12 +27,15 @@ export const ReplayController = ({ token, onReplayStateChange }) => {
       setStatus(data);
       if (onReplayStateChange) onReplayStateChange(data);
     } catch {}
-  }, [token]);
+  }, [authHeader, onReplayStateChange]);
 
   useEffect(() => {
     fetchStatus();
+    if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(fetchStatus, 1000);
-    return () => clearInterval(pollRef.current);
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
   }, [fetchStatus]);
 
   const startReplay = async () => {

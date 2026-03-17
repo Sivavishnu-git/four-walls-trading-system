@@ -183,7 +183,9 @@ export const TradeSetup = ({ token, replayActive }) => {
     }
   }, [token, replayActive]);
 
-  useEffect(() => { fetchSetup(); }, []);
+  useEffect(() => {
+    fetchSetup();
+  }, [fetchSetup]);
 
   useEffect(() => {
     if (autoRefresh) timerRef.current = setInterval(fetchSetup, 15000);

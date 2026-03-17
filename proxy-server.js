@@ -8,6 +8,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { promisify } from "util";
+import crypto from "crypto";
 import { updateEnvToken } from "./utils/tokenManager.js";
 
 const gunzip = promisify(zlib.gunzip);
@@ -72,19 +73,30 @@ app.use((req, res, next) => {
 
 // --- AUTH ENDPOINTS ---
 
-// 1. Redirect to Upstox Login
-let lastFrontendOrigin = FRONTEND_URI;
+// In-memory map of OAuth state -> frontend origin to avoid global cross-user leakage
+const OAUTH_STATE_STORE = new Map();
 
+// 1. Redirect to Upstox Login
 app.get("/api/auth/login", (req, res) => {
+  let frontendOrigin = FRONTEND_URI;
   const referer = req.headers.referer || req.headers.origin;
   if (referer) {
-    try { lastFrontendOrigin = new URL(referer).origin; } catch {}
+    try {
+      const url = new URL(referer);
+      frontendOrigin = `${url.protocol}//${url.host}`;
+    } catch {
+      // ignore malformed referer and fall back to default
+    }
   }
+
+  const state = crypto.randomBytes(16).toString("hex");
+  OAUTH_STATE_STORE.set(state, frontendOrigin);
+
   const params = querystring.stringify({
     response_type: "code",
     client_id: CLIENT_ID,
     redirect_uri: REDIRECT_URI,
-    state: "random_state_string",
+    state,
   });
   const loginUrl = `https://api.upstox.com/v2/login/authorization/dialog?${params}`;
   console.log("Redirecting to Upstox Login:", loginUrl);
@@ -93,9 +105,13 @@ app.get("/api/auth/login", (req, res) => {
 
 // 2. Handle Callback & Exchange Code
 app.get("/api/auth/callback", async (req, res) => {
-  const { code, error } = req.query;
+  const { code, error, state } = req.query;
 
-  const redirectBase = lastFrontendOrigin || FRONTEND_URI;
+  let redirectBase = FRONTEND_URI;
+  if (state && OAUTH_STATE_STORE.has(state)) {
+    redirectBase = OAUTH_STATE_STORE.get(state) || FRONTEND_URI;
+    OAUTH_STATE_STORE.delete(state);
+  }
 
   if (error) {
     return res.redirect(`${redirectBase}?error=${error}`);
@@ -960,17 +976,33 @@ app.get("/api/trade-setup", async (req, res) => {
 // ========================
 // HISTORICAL REPLAY ENGINE
 // ========================
-const REPLAY = {
-  active: false,
-  candles: [],
-  position: 0,
-  speed: 1,
-  playing: false,
-  date: null,
-  pivots: null,
-  paperOrders: [],
-  paperPositions: [],
-  timer: null,
+// Per-session replay storage keyed by access token (or IP as fallback)
+const REPLAY_SESSIONS = new Map();
+
+const getReplayKey = (req) => {
+  const rawAuth = (req.headers.authorization || "").replace("Bearer ", "").trim();
+  if (rawAuth) return rawAuth;
+  return req.ip || "anonymous";
+};
+
+const getOrCreateReplay = (key) => {
+  if (!REPLAY_SESSIONS.has(key)) {
+    REPLAY_SESSIONS.set(key, {
+      active: false,
+      candles: [],
+      position: 0,
+      speed: 1,
+      playing: false,
+      date: null,
+      pivots: null,
+      paperOrders: [],
+      paperPositions: [],
+      timer: null,
+      futKey: null,
+      futSymbol: null,
+    });
+  }
+  return REPLAY_SESSIONS.get(key);
 };
 
 app.post("/api/replay/start", async (req, res) => {
@@ -1031,6 +1063,9 @@ app.post("/api/replay/start", async (req, res) => {
       }
     }
 
+    const replayKey = getReplayKey(req);
+    const REPLAY = getOrCreateReplay(replayKey);
+
     REPLAY.active = true;
     REPLAY.candles = dayCandles;
     REPLAY.position = 0;
@@ -1059,6 +1094,8 @@ app.post("/api/replay/start", async (req, res) => {
 });
 
 app.post("/api/replay/control", (req, res) => {
+  const replayKey = getReplayKey(req);
+  const REPLAY = getOrCreateReplay(replayKey);
   const { action, speed } = req.body;
   if (!REPLAY.active) return res.status(400).json({ error: "No active replay session" });
 
@@ -1132,6 +1169,8 @@ app.post("/api/replay/control", (req, res) => {
 });
 
 app.get("/api/replay/status", (req, res) => {
+  const replayKey = getReplayKey(req);
+  const REPLAY = getOrCreateReplay(replayKey);
   if (!REPLAY.active) return res.json({ status: "success", data: { active: false } });
   const candle = REPLAY.candles[REPLAY.position];
   res.json({
@@ -1145,6 +1184,8 @@ app.get("/api/replay/status", (req, res) => {
 });
 
 app.get("/api/replay/quotes", (req, res) => {
+  const replayKey = getReplayKey(req);
+  const REPLAY = getOrCreateReplay(replayKey);
   if (!REPLAY.active || REPLAY.candles.length === 0) return res.json({ data: {} });
   const c = REPLAY.candles[REPLAY.position];
   const key = REPLAY.futKey;
@@ -1159,6 +1200,8 @@ app.get("/api/replay/quotes", (req, res) => {
 });
 
 app.get("/api/replay/trade-setup", (req, res) => {
+  const replayKey = getReplayKey(req);
+  const REPLAY = getOrCreateReplay(replayKey);
   if (!REPLAY.active || REPLAY.candles.length === 0)
     return res.status(400).json({ error: "No active replay" });
 
@@ -1199,6 +1242,8 @@ app.get("/api/replay/trade-setup", (req, res) => {
 });
 
 app.post("/api/replay/order", (req, res) => {
+  const replayKey = getReplayKey(req);
+  const REPLAY = getOrCreateReplay(replayKey);
   if (!REPLAY.active) return res.status(400).json({ error: "No active replay" });
   const { instrument_token, transaction_type, quantity, order_type, price } = req.body;
   const candle = REPLAY.candles[REPLAY.position];
@@ -1230,6 +1275,8 @@ app.post("/api/replay/order", (req, res) => {
 });
 
 app.get("/api/replay/orders", (req, res) => {
+  const replayKey = getReplayKey(req);
+  const REPLAY = getOrCreateReplay(replayKey);
   if (REPLAY.active) {
     REPLAY.paperPositions.forEach(p => {
       const candle = REPLAY.candles[REPLAY.position];

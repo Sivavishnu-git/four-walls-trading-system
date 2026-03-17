@@ -88,8 +88,10 @@ export const OrderPanel = ({ token, replayActive }) => {
     fetchPositions();
     fetchOrders();
   }, [fetchATM, fetchPositions, fetchOrders]);
-
-  useEffect(() => { refreshAll(); }, []);
+ 
+  useEffect(() => {
+    refreshAll();
+  }, [refreshAll]);
 
   useEffect(() => {
     if (autoRefresh) timerRef.current = setInterval(refreshAll, 5000);
