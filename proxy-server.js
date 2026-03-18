@@ -1296,7 +1296,8 @@ if (IS_PROD) {
   const distPath = path.join(__dirname, "dist");
   if (fs.existsSync(distPath)) {
     app.use(express.static(distPath));
-    app.get("*", (req, res) => {
+    // Express 5 / path-to-regexp v8: "*" is invalid; use named wildcard for SPA fallback
+    app.get("/{*path}", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
     console.log("Serving static frontend from dist/");

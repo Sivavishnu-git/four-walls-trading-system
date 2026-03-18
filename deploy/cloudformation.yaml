@@ -6,9 +6,11 @@ Description: >
 Parameters:
   InstanceType:
     Type: String
-    Default: t2.micro
-    AllowedValues: [t2.micro, t3.micro, t3.small]
-    Description: EC2 instance type (t2.micro is free-tier eligible)
+    Default: t3.micro
+    AllowedValues: [t3.micro, t2.micro]
+    Description: >
+      Use t3.micro first for Free Tier (many new accounts only allow this).
+      t3.small is NOT free tier and will fail if your account is Free-Tier-only.
 
   KeyPairName:
     Type: AWS::EC2::KeyPair::KeyName
