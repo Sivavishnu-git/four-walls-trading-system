@@ -48,9 +48,13 @@ button:hover {
   background-color: #1e4bd8;
 }
 
-button:focus,
+button:focus {
+  outline: none;
+}
+
 button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
+  outline: 2px solid #2962ff;
+  outline-offset: 2px;
 }
 
 /* ===== OI Monitor Styles ===== */
