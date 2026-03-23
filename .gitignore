@@ -8,6 +8,7 @@
 # Access tokens and API credentials
 *.token
 *.key
+*.pem
 .env
 .env.local
 .env.development
@@ -17,6 +18,9 @@ config/secrets.json
 config/credentials.json
 secrets/
 credentials/
+
+# CloudFormation local params (secrets)
+deploy/cfn-params.json
 
 # Upstox API tokens (CRITICAL - Never commit!)
 *access_token*

@@ -1,0 +1,9 @@
+{
+  "InstanceType": "t3.micro",
+  "KeyPairName": "REPLACE_WITH_YOUR_EC2_KEY_PAIR_NAME",
+  "GitRepoURL": "https://github.com/Sivavishnu-git/four-walls-trading-system.git",
+  "GitBranch": "main",
+  "UpstoxAPIKey": "YOUR_UPSTOX_CLIENT_ID",
+  "UpstoxAPISecret": "YOUR_UPSTOX_SECRET",
+  "AllowedSSHCidr": "0.0.0.0/0"
+}

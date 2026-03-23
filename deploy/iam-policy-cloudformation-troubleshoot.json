@@ -1,0 +1,34 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "CloudFormationRead",
+      "Effect": "Allow",
+      "Action": [
+        "cloudformation:DescribeStacks",
+        "cloudformation:DescribeStackEvents",
+        "cloudformation:DescribeStackResources",
+        "cloudformation:ListStacks",
+        "cloudformation:ListStackResources"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "EC2Read",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeInstances",
+        "ec2:DescribeInstanceStatus",
+        "ec2:DescribeAddresses",
+        "ec2:DescribeSecurityGroups"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "STS",
+      "Effect": "Allow",
+      "Action": ["sts:GetCallerIdentity"],
+      "Resource": "*"
+    }
+  ]
+}
