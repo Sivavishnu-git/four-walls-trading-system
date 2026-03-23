@@ -34,6 +34,8 @@ export const OrderPanel = ({ token }) => {
   const [gttOrders, setGttOrders] = useState([]);
   const [gttLoading, setGttLoading] = useState(false);
   const [gttConfigError, setGttConfigError] = useState(null);
+  const [gttEditModal, setGttEditModal] = useState(null);
+  const [gttModifySaving, setGttModifySaving] = useState(false);
 
   const timerRef = useRef(null);
 
