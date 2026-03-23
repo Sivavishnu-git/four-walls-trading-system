@@ -15,6 +15,24 @@ export const HistoricalData = ({ token, instrumentKey: propInstrumentKey }) => {
         if (propInstrumentKey) setInstrumentKey(propInstrumentKey);
     }, [propInstrumentKey]);
 
+    /** If parent has not supplied a key yet, load current NIFTY future from discover (same as App). */
+    useEffect(() => {
+        if (propInstrumentKey) return;
+        let cancelled = false;
+        fetch(`${API_BASE}/api/tools/discover-nifty-future`)
+            .then((r) => r.json())
+            .then((json) => {
+                if (cancelled) return;
+                if (json.status === "success" && json.data?.instrument_key) {
+                    setInstrumentKey(json.data.instrument_key);
+                }
+            })
+            .catch(() => {});
+        return () => {
+            cancelled = true;
+        };
+    }, [propInstrumentKey]);
+
     useEffect(() => {
         if (searchQuery.length < 2) { setSearchResults([]); return; }
         clearTimeout(searchTimeout.current);
@@ -40,17 +58,35 @@ export const HistoricalData = ({ token, instrumentKey: propInstrumentKey }) => {
 
     const fetchData = async () => {
         if (!token) {
-            setError("No access token. Please set it in the OI Monitor page first.");
+            setError("No access token. Please log in first.");
+            return;
+        }
+        if (!instrumentKey || !String(instrumentKey).trim()) {
+            setError("Instrument key is missing. Wait for NIFTY future to load, or search and pick a symbol.");
             return;
         }
         setLoading(true);
         setError(null);
         try {
-            const url = `${API_BASE}/api/historical?instrument_key=${encodeURIComponent(instrumentKey)}&interval=${interval}&to_date=${toDate}&from_date=${fromDate}`;
+            const url = `${API_BASE}/api/historical?instrument_key=${encodeURIComponent(instrumentKey.trim())}&interval=${interval}&to_date=${toDate}&from_date=${fromDate}`;
             const res = await fetch(url, {
                 headers: { Authorization: `Bearer ${token}` },
             });
-            const json = await res.json();
+            const text = await res.text();
+            let json;
+            try {
+                json = JSON.parse(text);
+            } catch {
+                setError(
+                    res.ok
+                        ? "Unexpected response from server."
+                        : text.includes("<html")
+                          ? "Request failed (often empty instrument key or bad URL). Check instrument key and try again."
+                          : text.slice(0, 200),
+                );
+                setCandles([]);
+                return;
+            }
 
             if (json.status === "success" && json.data?.candles) {
                 // Sort ascending by time
@@ -59,7 +95,12 @@ export const HistoricalData = ({ token, instrumentKey: propInstrumentKey }) => {
                 );
                 setCandles(sorted);
             } else {
-                setError(json.errors?.[0]?.message || JSON.stringify(json));
+                const msg =
+                    json.errors?.[0]?.message ||
+                    json.error ||
+                    json.message ||
+                    (typeof json === "object" ? JSON.stringify(json) : String(json));
+                setError(msg);
                 setCandles([]);
             }
         } catch (err) {

@@ -127,7 +127,17 @@ function App() {
   });
 
   return (
-    <div className="App" style={{ height: "100vh", width: "100vw", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+    <div
+      className="App"
+      style={{
+        minHeight: "100vh",
+        height: "auto",
+        width: "100%",
+        maxWidth: "100vw",
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
       <div style={{
         display: "flex",
         alignItems: "center",
@@ -135,7 +145,8 @@ function App() {
         background: "#131722",
         borderBottom: "2px solid #2a2e39",
         padding: "0 16px",
-        flexShrink: 0,
+        flexWrap: "wrap",
+        gap: "8px",
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: "0" }}>
           <button onClick={() => setPage("oi")} style={tabStyle("oi", "#26a69a")}>
@@ -215,25 +226,32 @@ function App() {
         </div>
       </div>
 
-      <div style={{ flex: 1, overflow: "auto", position: "relative" }}>
-        <div style={{ display: page === "oi" ? "block" : "none", height: "100%", overflow: "auto" }}>
+      <div
+        style={{
+          flex: "1 1 auto",
+          minHeight: "calc(100vh - 52px)",
+          overflow: "visible",
+          position: "relative",
+        }}
+      >
+        <div style={{ display: page === "oi" ? "block" : "none", minHeight: "calc(100vh - 52px)", overflow: "auto" }}>
           <TabErrorBoundary><OIMonitor token={accessToken} instrumentKey={instrumentKey} /></TabErrorBoundary>
         </div>
-        <div style={{ display: page === "historical" ? "block" : "none", height: "100%", overflow: "auto" }}>
+        <div style={{ display: page === "historical" ? "block" : "none", minHeight: "calc(100vh - 52px)", overflow: "auto" }}>
           <TabErrorBoundary><HistoricalData token={accessToken} instrumentKey={instrumentKey} /></TabErrorBoundary>
         </div>
-        <div style={{ display: page === "optionchain" ? "block" : "none", height: "100%", overflow: "auto" }}>
+        <div style={{ display: page === "optionchain" ? "block" : "none", minHeight: "calc(100vh - 52px)", overflow: "auto" }}>
           <TabErrorBoundary><OptionChain token={accessToken} /></TabErrorBoundary>
         </div>
-        <div style={{ display: page === "tradesetup" ? "block" : "none", height: "100%", overflow: "auto" }}>
+        <div style={{ display: page === "tradesetup" ? "block" : "none", minHeight: "calc(100vh - 52px)", overflow: "auto" }}>
           <TabErrorBoundary><TradeSetup token={accessToken} /></TabErrorBoundary>
         </div>
-        <div style={{ display: page === "chart" ? "block" : "none", height: "100%", overflow: "hidden" }}>
+        <div style={{ display: page === "chart" ? "block" : "none", height: "calc(100vh - 52px)", minHeight: 360, overflow: "hidden" }}>
           {page === "chart" && (
             <TabErrorBoundary><TradingViewChart token={accessToken} /></TabErrorBoundary>
           )}
         </div>
-        <div style={{ display: page === "orders" ? "block" : "none", height: "100%", overflow: "auto" }}>
+        <div style={{ display: page === "orders" ? "block" : "none", minHeight: "calc(100vh - 52px)", overflow: "auto" }}>
           <TabErrorBoundary><OrderPanel token={accessToken} /></TabErrorBoundary>
         </div>
       </div>

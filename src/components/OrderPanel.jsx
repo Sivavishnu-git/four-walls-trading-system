@@ -2,12 +2,12 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import {
   RefreshCw, ShoppingCart, X, AlertTriangle, CheckCircle,
   TrendingUp, TrendingDown, ArrowUpCircle, ArrowDownCircle,
-  DollarSign, List, Briefcase,
+  DollarSign, List, Briefcase, Pencil,
 } from "lucide-react";
 
 import { API_BASE } from "../config";
 
-const DEFAULT_LOT_SIZE = 75;
+const DEFAULT_LOT_SIZE = 65;
 const BASE_URL = API_BASE;
 
 export const OrderPanel = ({ token }) => {
@@ -29,6 +29,11 @@ export const OrderPanel = ({ token }) => {
   const [orderType, setOrderType] = useState("MARKET");
   const [product, setProduct] = useState("I");
   const [limitPrice, setLimitPrice] = useState("");
+  const [gttTriggerPrice, setGttTriggerPrice] = useState("");
+  const [gttTriggerSide, setGttTriggerSide] = useState("ABOVE");
+  const [gttOrders, setGttOrders] = useState([]);
+  const [gttLoading, setGttLoading] = useState(false);
+  const [gttConfigError, setGttConfigError] = useState(null);
 
   const timerRef = useRef(null);
 
@@ -73,11 +78,30 @@ export const OrderPanel = ({ token }) => {
     finally { setOrderLoading(false); }
   }, [token]);
 
+  const fetchGttOrders = useCallback(async () => {
+    if (!token) return;
+    setGttLoading(true);
+    try {
+      const res = await fetch(`${BASE_URL}/api/order/gtt`, { headers: authHeader });
+      const json = await res.json();
+      if (json.status === "success" && json.data) {
+        setGttOrders(Array.isArray(json.data) ? json.data : []);
+      } else {
+        setGttOrders([]);
+      }
+    } catch {
+      setGttOrders([]);
+    } finally {
+      setGttLoading(false);
+    }
+  }, [token]);
+
   const refreshAll = useCallback(() => {
     fetchATM();
     fetchPositions();
     fetchOrders();
-  }, [fetchATM, fetchPositions, fetchOrders]);
+    fetchGttOrders();
+  }, [fetchATM, fetchPositions, fetchOrders, fetchGttOrders]);
  
   useEffect(() => {
     refreshAll();
@@ -89,7 +113,17 @@ export const OrderPanel = ({ token }) => {
   }, [autoRefresh, refreshAll]);
 
   const openConfirm = (option, txnType) => {
-    const lotSize = option.lot_size || DEFAULT_LOT_SIZE;
+    if (orderType === "GTT") {
+      const t = parseFloat(gttTriggerPrice);
+      if (gttTriggerPrice === "" || Number.isNaN(t) || t <= 0) {
+        setGttConfigError("Enter a valid trigger price for GTT");
+        return;
+      }
+      setGttConfigError(null);
+    }
+    const lotSize = DEFAULT_LOT_SIZE;
+    const limitPx = orderType === "LIMIT" ? parseFloat(limitPrice) || option.ltp : 0;
+    const triggerPx = orderType === "GTT" ? parseFloat(gttTriggerPrice) : 0;
     setConfirmModal({
       option,
       txnType,
@@ -98,7 +132,8 @@ export const OrderPanel = ({ token }) => {
       lotSize,
       orderType,
       product,
-      price: orderType === "LIMIT" ? parseFloat(limitPrice) || option.ltp : 0,
+      price: orderType === "LIMIT" ? limitPx : orderType === "GTT" ? triggerPx : 0,
+      gttTriggerSide: orderType === "GTT" ? gttTriggerSide : null,
     });
     setOrderResult(null);
   };
@@ -108,6 +143,45 @@ export const OrderPanel = ({ token }) => {
     setPlacing(true);
     setOrderResult(null);
     try {
+      if (confirmModal.orderType === "GTT") {
+        const body = {
+          type: "SINGLE",
+          quantity: confirmModal.qty,
+          product: confirmModal.product,
+          instrument_token: confirmModal.option.instrument_key,
+          transaction_type: confirmModal.txnType,
+          rules: [
+            {
+              strategy: "ENTRY",
+              trigger_type: confirmModal.gttTriggerSide || "ABOVE",
+              trigger_price: confirmModal.price,
+              market_protection: 0,
+            },
+          ],
+        };
+        const res = await fetch(`${BASE_URL}/api/order/gtt/place`, {
+          method: "POST",
+          headers: { ...authHeader, "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const json = await res.json();
+        const gttId = json.data?.gtt_order_ids?.[0];
+        if (res.ok && json.status === "success" && gttId) {
+          setOrderResult({
+            success: true,
+            orderId: gttId,
+            message: "GTT order placed successfully!",
+          });
+          setTimeout(() => { fetchGttOrders(); fetchOrders(); fetchPositions(); }, 1500);
+        } else {
+          setOrderResult({
+            success: false,
+            message: json.errors?.[0]?.message || json.message || json.error || "GTT order failed",
+          });
+        }
+        return;
+      }
+
       const body = {
         instrument_token: confirmModal.option.instrument_key,
         quantity: confirmModal.qty,
@@ -149,6 +223,103 @@ export const OrderPanel = ({ token }) => {
       if (res.ok) fetchOrders();
       else alert(json.error || "Cancel failed");
     } catch (err) { alert(err.message); }
+  };
+
+  const cancelGttOrder = async (gttOrderId) => {
+    try {
+      const res = await fetch(`${BASE_URL}/api/order/gtt/cancel`, {
+        method: "DELETE",
+        headers: { ...authHeader, "Content-Type": "application/json" },
+        body: JSON.stringify({ gtt_order_id: gttOrderId }),
+      });
+      const json = await res.json();
+      if (res.ok && json.status === "success") fetchGttOrders();
+      else alert(json.errors?.[0]?.message || json.error || "GTT cancel failed");
+    } catch (err) { alert(err.message); }
+  };
+
+  const openGttEdit = (g) => {
+    const entry = g.rules?.find((r) => r.strategy === "ENTRY");
+    const entryOpen = entry?.status === "OPEN";
+    const rules = (g.rules || []).map((r) => {
+      let trigger_type = r.trigger_type;
+      if (r.strategy === "ENTRY" && entryOpen) trigger_type = "IMMEDIATE";
+      if (r.strategy === "TARGET" || r.strategy === "STOPLOSS") trigger_type = "IMMEDIATE";
+      return {
+        strategy: r.strategy,
+        trigger_type,
+        trigger_price: String(r.trigger_price ?? ""),
+        trailing_gap: r.trailing_gap != null ? String(r.trailing_gap) : "",
+      };
+    });
+    setGttEditModal({
+      gtt_order_id: g.gtt_order_id,
+      type: g.type || "SINGLE",
+      quantity: g.quantity,
+      rules,
+      entryOpen,
+    });
+  };
+
+  const submitGttModify = async () => {
+    if (!gttEditModal) return;
+    const qty = parseInt(String(gttEditModal.quantity), 10);
+    if (Number.isNaN(qty) || qty <= 0) {
+      alert("Enter a valid quantity");
+      return;
+    }
+    const rulesPayload = [];
+    for (const r of gttEditModal.rules) {
+      const tp = parseFloat(r.trigger_price);
+      if (r.trigger_price === "" || Number.isNaN(tp)) {
+        alert(`Invalid trigger price for ${r.strategy}`);
+        return;
+      }
+      const rule = {
+        strategy: r.strategy,
+        trigger_type: r.trigger_type,
+        trigger_price: tp,
+        market_protection: 0,
+      };
+      if (r.strategy === "STOPLOSS" && r.trailing_gap !== "") {
+        const tg = parseFloat(r.trailing_gap);
+        if (!Number.isNaN(tg)) rule.trailing_gap = tg;
+      }
+      rulesPayload.push(rule);
+    }
+    setGttModifySaving(true);
+    try {
+      const body = {
+        gtt_order_id: gttEditModal.gtt_order_id,
+        type: gttEditModal.type,
+        quantity: qty,
+        rules: rulesPayload,
+      };
+      const res = await fetch(`${BASE_URL}/api/order/gtt/modify`, {
+        method: "PUT",
+        headers: { ...authHeader, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (res.ok && json.status === "success") {
+        setGttEditModal(null);
+        fetchGttOrders();
+      } else {
+        alert(json.errors?.[0]?.message || json.message || json.error || "GTT modify failed");
+      }
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setGttModifySaving(false);
+    }
+  };
+
+  const updateGttEditRule = (index, patch) => {
+    setGttEditModal((prev) => {
+      if (!prev) return prev;
+      const rules = prev.rules.map((r, i) => (i === index ? { ...r, ...patch } : r));
+      return { ...prev, rules };
+    });
   };
 
   const exitPosition = (pos) => {
@@ -232,8 +403,8 @@ export const OrderPanel = ({ token }) => {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
           <span style={{ color: "#888", fontSize: "0.8rem", fontWeight: 600 }}>Type:</span>
-          {["MARKET", "LIMIT"].map(t => (
-            <button key={t} onClick={() => setOrderType(t)} style={{
+          {["MARKET", "LIMIT", "GTT"].map(t => (
+            <button key={t} onClick={() => { setOrderType(t); setGttConfigError(null); }} style={{
               ...btnSmall,
               background: orderType === t ? "rgba(41,98,255,0.2)" : "rgba(255,255,255,0.05)",
               color: orderType === t ? "#2962ff" : "#888",
@@ -246,6 +417,34 @@ export const OrderPanel = ({ token }) => {
             <span style={{ color: "#888", fontSize: "0.8rem" }}>Price:</span>
             <input type="number" value={limitPrice} onChange={e => setLimitPrice(e.target.value)}
               placeholder="0.00" style={inputStyle} />
+          </div>
+        )}
+        {orderType === "GTT" && (
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <span style={{ color: "#888", fontSize: "0.8rem" }}>Trigger:</span>
+              {["ABOVE", "BELOW"].map(s => (
+                <button key={s} type="button" onClick={() => setGttTriggerSide(s)} style={{
+                  ...btnSmall,
+                  background: gttTriggerSide === s ? "rgba(156,39,176,0.25)" : "rgba(255,255,255,0.05)",
+                  color: gttTriggerSide === s ? "#ce93d8" : "#888",
+                  border: `1px solid ${gttTriggerSide === s ? "rgba(156,39,176,0.45)" : "rgba(255,255,255,0.1)"}`,
+                }}>{s}</button>
+              ))}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <span style={{ color: "#888", fontSize: "0.8rem" }}>Price:</span>
+              <input
+                type="number"
+                value={gttTriggerPrice}
+                onChange={(e) => { setGttTriggerPrice(e.target.value); setGttConfigError(null); }}
+                placeholder="Trigger"
+                style={{ ...inputStyle, width: "100px" }}
+              />
+            </div>
+            <span style={{ color: "#666", fontSize: "0.72rem", maxWidth: "220px" }}>
+              Fires when LTP goes {gttTriggerSide === "ABOVE" ? "above" : "below"} this level (single-leg GTT).
+            </span>
           </div>
         )}
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -385,6 +584,96 @@ export const OrderPanel = ({ token }) => {
         </div>
       </div>
 
+      {/* Active GTT */}
+      <div className="history-section" style={{ marginBottom: "20px" }}>
+        <div className="section-header">
+          <h2><List size={18} style={{ marginRight: "6px" }} />Active GTT</h2>
+          <button onClick={fetchGttOrders} style={{ ...btnSmall, padding: "4px 10px" }}>
+            {gttLoading ? <RefreshCw size={12} className="spinning" /> : "Refresh"}
+          </button>
+        </div>
+        <div className="table-container" style={{ maxHeight: "260px" }}>
+          {gttOrders.length === 0 ? (
+            <div className="empty-state" style={{ padding: "24px" }}>
+              <List size={28} />
+              <p>No active GTT orders</p>
+            </div>
+          ) : (
+            <table className="oi-table" style={{ fontSize: "0.8rem" }}>
+              <thead>
+                <tr>
+                  <th>GTT ID</th>
+                  <th>Symbol</th>
+                  <th>Qty</th>
+                  <th>Trigger</th>
+                  <th>Status</th>
+                  <th>Expires</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {gttOrders.map((g) => {
+                  const entry = g.rules?.find((r) => r.strategy === "ENTRY");
+                  const canCancelGtt = entry && ["SCHEDULED", "PENDING", "OPEN"].includes(entry.status);
+                  const canModifyGtt = canCancelGtt;
+                  const tsMs = (v) => {
+                    if (v == null) return null;
+                    const n = Number(v);
+                    if (!Number.isFinite(n)) return null;
+                    return n > 1e14 ? n / 1000 : n;
+                  };
+                  const exp = tsMs(g.expires_at);
+                  return (
+                    <tr key={g.gtt_order_id}>
+                      <td style={{ fontFamily: "monospace", fontSize: "0.72rem", color: "#aaa" }}>{g.gtt_order_id}</td>
+                      <td style={{ fontWeight: 600 }}>{g.trading_symbol || g.instrument_token}</td>
+                      <td>{g.quantity}</td>
+                      <td style={{ fontFamily: "monospace" }}>
+                        {entry ? `${entry.trigger_type} ${entry.trigger_price}` : "--"}
+                      </td>
+                      <td>
+                        <span style={{
+                          padding: "2px 8px", borderRadius: "4px", fontSize: "0.7rem", fontWeight: 700,
+                          background: "rgba(156,39,176,0.15)", color: "#ce93d8",
+                        }}>
+                          {entry?.status || "--"}
+                        </span>
+                      </td>
+                      <td className="time-cell" style={{ fontSize: "0.75rem" }}>
+                        {exp ? new Date(exp).toLocaleString("en-IN", { hour12: false, day: "2-digit", month: "short" }) : "--"}
+                      </td>
+                      <td>
+                        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                          {canModifyGtt && (
+                            <button
+                              type="button"
+                              onClick={() => openGttEdit(g)}
+                              style={{ ...btnSmall, padding: "2px 8px", fontSize: "0.7rem", background: "rgba(41,98,255,0.15)", color: "#64b5f6", border: "1px solid rgba(41,98,255,0.35)" }}
+                            >
+                              <Pencil size={12} style={{ verticalAlign: "middle", marginRight: "4px" }} />
+                              EDIT
+                            </button>
+                          )}
+                          {canCancelGtt && (
+                            <button
+                              type="button"
+                              onClick={() => cancelGttOrder(g.gtt_order_id)}
+                              style={{ ...btnSmall, padding: "2px 8px", fontSize: "0.7rem", background: "rgba(239,83,80,0.15)", color: "#ef5350", border: "1px solid rgba(239,83,80,0.3)" }}
+                            >
+                              CANCEL
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
       {/* Order Book */}
       <div className="history-section">
         <div className="section-header">
@@ -488,7 +777,11 @@ export const OrderPanel = ({ token }) => {
               <div style={modalRow}>
                 <span style={{ color: "#888" }}>Est. Value:</span>
                 <span style={{ color: "#ff9800", fontWeight: 700 }}>
-                  {(confirmModal.qty * (confirmModal.orderType === "LIMIT" ? confirmModal.price : confirmModal.option.ltp)).toFixed(2)}
+                  {(confirmModal.qty * (
+                    confirmModal.orderType === "LIMIT" || confirmModal.orderType === "GTT"
+                      ? confirmModal.price
+                      : confirmModal.option.ltp
+                  )).toFixed(2)}
                 </span>
               </div>
             </div>
@@ -524,6 +817,121 @@ export const OrderPanel = ({ token }) => {
                   {placing ? "Placing..." : `CONFIRM ${confirmModal.txnType}`}
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {gttEditModal && (
+        <div style={overlayStyle}>
+          <div style={{ ...modalStyle, maxWidth: "520px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+              <h3 style={{ margin: 0, color: "#fff", fontSize: "1.1rem" }}>
+                <Pencil size={18} style={{ color: "#64b5f6", marginRight: "8px", verticalAlign: "middle" }} />
+                Modify GTT
+              </h3>
+              <button type="button" onClick={() => setGttEditModal(null)} style={{ background: "none", border: "none", color: "#888", cursor: "pointer" }}>
+                <X size={20} />
+              </button>
+            </div>
+            <p style={{ color: "#888", fontSize: "0.8rem", marginBottom: "14px", wordBreak: "break-all" }}>
+              <span style={{ color: "#aaa" }}>{gttEditModal.gtt_order_id}</span>
+              {gttEditModal.entryOpen && (
+                <span style={{ display: "block", marginTop: "8px", color: "#ff9800" }}>
+                  ENTRY leg is OPEN: quantity cannot be changed; ENTRY trigger type must be IMMEDIATE (Upstox).
+                </span>
+              )}
+            </p>
+            <div style={{ marginBottom: "16px", display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+              <span style={{ color: "#888", fontSize: "0.85rem" }}>Quantity</span>
+              <input
+                type="number"
+                min={1}
+                disabled={gttEditModal.entryOpen}
+                value={gttEditModal.quantity}
+                onChange={(e) => setGttEditModal((prev) => (prev ? { ...prev, quantity: e.target.value } : prev))}
+                style={{ ...inputStyle, width: "100px", opacity: gttEditModal.entryOpen ? 0.55 : 1 }}
+              />
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px", maxHeight: "min(50vh, 360px)", overflowY: "auto" }}>
+              {gttEditModal.rules.map((r, i) => {
+                const entryOptions = r.strategy === "ENTRY"
+                  ? (gttEditModal.entryOpen ? ["IMMEDIATE"] : ["ABOVE", "BELOW", "IMMEDIATE"])
+                  : ["IMMEDIATE"];
+                return (
+                  <div
+                    key={`${r.strategy}-${i}`}
+                    style={{
+                      padding: "12px",
+                      background: "rgba(255,255,255,0.03)",
+                      borderRadius: "8px",
+                      border: "1px solid rgba(255,255,255,0.08)",
+                    }}
+                  >
+                    <div style={{ color: "#ce93d8", fontWeight: 700, fontSize: "0.85rem", marginBottom: "10px" }}>{r.strategy}</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "12px", alignItems: "flex-end" }}>
+                      <div>
+                        <span style={{ color: "#888", fontSize: "0.75rem", display: "block", marginBottom: "4px" }}>Trigger type</span>
+                        <select
+                          value={r.trigger_type}
+                          onChange={(e) => updateGttEditRule(i, { trigger_type: e.target.value })}
+                          style={{ ...inputStyle, width: "auto", minWidth: "120px" }}
+                        >
+                          {entryOptions.map((opt) => (
+                            <option key={opt} value={opt}>{opt}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <span style={{ color: "#888", fontSize: "0.75rem", display: "block", marginBottom: "4px" }}>Trigger price</span>
+                        <input
+                          type="number"
+                          value={r.trigger_price}
+                          onChange={(e) => updateGttEditRule(i, { trigger_price: e.target.value })}
+                          style={{ ...inputStyle, width: "110px" }}
+                        />
+                      </div>
+                      {r.strategy === "STOPLOSS" && (
+                        <div>
+                          <span style={{ color: "#888", fontSize: "0.75rem", display: "block", marginBottom: "4px" }}>Trailing gap</span>
+                          <input
+                            type="number"
+                            value={r.trailing_gap}
+                            onChange={(e) => updateGttEditRule(i, { trailing_gap: e.target.value })}
+                            placeholder="TSL"
+                            style={{ ...inputStyle, width: "90px" }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ display: "flex", gap: "12px", marginTop: "20px" }}>
+              <button
+                type="button"
+                onClick={() => setGttEditModal(null)}
+                style={{
+                  flex: 1, padding: "12px", borderRadius: "8px", cursor: "pointer",
+                  background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.15)", color: "#888",
+                  fontSize: "0.9rem", fontWeight: 600,
+                }}
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={submitGttModify}
+                disabled={gttModifySaving}
+                style={{
+                  flex: 1, padding: "12px", borderRadius: "8px", cursor: gttModifySaving ? "not-allowed" : "pointer",
+                  background: "rgba(41,98,255,0.2)", border: "1px solid rgba(41,98,255,0.5)", color: "#64b5f6",
+                  fontSize: "0.9rem", fontWeight: 700,
+                }}
+              >
+                {gttModifySaving ? "Saving..." : "Save changes"}
+              </button>
             </div>
           </div>
         </div>

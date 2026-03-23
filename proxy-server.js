@@ -206,7 +206,22 @@ app.get("/api/historical", async (req, res) => {
       return res.status(400).json({ error: "Missing Authorization Header" });
     }
 
-    const targetUrl = `https://api.upstox.com/v2/historical-candle/${instrument_key}/${interval}/${to_date}/${from_date}`;
+    const ik = instrument_key != null ? String(instrument_key).trim() : "";
+    if (!ik) {
+      return res.status(400).json({
+        status: "error",
+        error: "instrument_key is required (e.g. NIFTY future key from discover).",
+      });
+    }
+    if (!interval || !to_date || !from_date) {
+      return res.status(400).json({
+        status: "error",
+        error: "interval, to_date, and from_date are required.",
+      });
+    }
+
+    const ikSeg = encodeURIComponent(ik);
+    const targetUrl = `https://api.upstox.com/v2/historical-candle/${ikSeg}/${interval}/${to_date}/${from_date}`;
     console.log("Fetching Historical Data (V2):", targetUrl);
 
     const response = await axios.get(targetUrl, {
@@ -481,6 +496,139 @@ app.delete("/api/order/cancel", async (req, res) => {
   }
 });
 
+// GTT orders (Upstox v3)
+app.post("/api/order/gtt/place", async (req, res) => {
+  try {
+    const accessToken = req.headers.authorization;
+    if (!accessToken) {
+      return res.status(400).json({ error: "Missing Authorization Header" });
+    }
+    const body = req.body;
+    const requiredFields = [
+      "type",
+      "quantity",
+      "product",
+      "instrument_token",
+      "transaction_type",
+      "rules",
+    ];
+    for (const field of requiredFields) {
+      if (body[field] === undefined || body[field] === null) {
+        return res.status(400).json({ error: `Missing required field: ${field}` });
+      }
+    }
+    if (!Array.isArray(body.rules) || body.rules.length === 0) {
+      return res.status(400).json({ error: "rules must be a non-empty array" });
+    }
+    const targetUrl = "https://api.upstox.com/v3/order/gtt/place";
+    console.log("Placing GTT Order:", JSON.stringify(body, null, 2));
+    const response = await axios.post(targetUrl, body, {
+      headers: {
+        Authorization: accessToken,
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+    });
+    res.json(response.data);
+  } catch (error) {
+    const errorData = error.response ? error.response.data : error.message;
+    console.error("GTT Place Error:", JSON.stringify(errorData, null, 2));
+    res
+      .status(error.response ? error.response.status : 500)
+      .json(error.response ? error.response.data : { error: "Proxy Error" });
+  }
+});
+
+app.put("/api/order/gtt/modify", async (req, res) => {
+  try {
+    const accessToken = req.headers.authorization;
+    if (!accessToken) {
+      return res.status(400).json({ error: "Missing Authorization Header" });
+    }
+    const body = req.body;
+    const requiredFields = ["gtt_order_id", "type", "quantity", "rules"];
+    for (const field of requiredFields) {
+      if (body[field] === undefined || body[field] === null) {
+        return res.status(400).json({ error: `Missing required field: ${field}` });
+      }
+    }
+    if (!Array.isArray(body.rules) || body.rules.length === 0) {
+      return res.status(400).json({ error: "rules must be a non-empty array" });
+    }
+    const targetUrl = "https://api.upstox.com/v3/order/gtt/modify";
+    console.log("Modify GTT Order:", JSON.stringify(body, null, 2));
+    const response = await axios.put(targetUrl, body, {
+      headers: {
+        Authorization: accessToken,
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+    });
+    res.json(response.data);
+  } catch (error) {
+    const errorData = error.response ? error.response.data : error.message;
+    console.error("GTT Modify Error:", JSON.stringify(errorData, null, 2));
+    res
+      .status(error.response ? error.response.status : 500)
+      .json(error.response ? error.response.data : { error: "Proxy Error" });
+  }
+});
+
+app.get("/api/order/gtt", async (req, res) => {
+  try {
+    const accessToken = req.headers.authorization;
+    if (!accessToken) {
+      return res.status(400).json({ error: "Missing Authorization Header" });
+    }
+    const { gtt_order_id } = req.query;
+    const targetUrl = "https://api.upstox.com/v3/order/gtt";
+    const response = await axios.get(targetUrl, {
+      headers: {
+        Authorization: accessToken,
+        Accept: "application/json",
+      },
+      params: gtt_order_id ? { gtt_order_id } : {},
+    });
+    res.json(response.data);
+  } catch (error) {
+    const errorData = error.response ? error.response.data : error.message;
+    console.error("GTT List Error:", JSON.stringify(errorData, null, 2));
+    res
+      .status(error.response ? error.response.status : 500)
+      .json(error.response ? error.response.data : { error: "Proxy Error" });
+  }
+});
+
+app.delete("/api/order/gtt/cancel", async (req, res) => {
+  try {
+    const accessToken = req.headers.authorization;
+    if (!accessToken) {
+      return res.status(400).json({ error: "Missing Authorization Header" });
+    }
+    const gtt_order_id = req.body?.gtt_order_id;
+    if (!gtt_order_id) {
+      return res.status(400).json({ error: "Missing gtt_order_id in body" });
+    }
+    const targetUrl = "https://api.upstox.com/v3/order/gtt/cancel";
+    console.log("Cancel GTT Order:", gtt_order_id);
+    const response = await axios.delete(targetUrl, {
+      headers: {
+        Authorization: accessToken,
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      data: { gtt_order_id },
+    });
+    res.json(response.data);
+  } catch (error) {
+    const errorData = error.response ? error.response.data : error.message;
+    console.error("GTT Cancel Error:", JSON.stringify(errorData, null, 2));
+    res
+      .status(error.response ? error.response.status : 500)
+      .json(error.response ? error.response.data : { error: "Proxy Error" });
+  }
+});
+
 // Proxy Endpoint for Getting Order Book
 app.get("/api/order/book", async (req, res) => {
   try {
@@ -666,11 +814,11 @@ app.get("/api/atm-options", async (req, res) => {
       const pe = expiryOpts.find(o => o.strike_price === strike && o.instrument_type === "PE");
       if (ce) {
         optKeys.push(ce.instrument_key);
-        optMeta[ce.instrument_key] = { strike, type: "CE", symbol: ce.trading_symbol, lot_size: ce.lot_size || 25 };
+        optMeta[ce.instrument_key] = { strike, type: "CE", symbol: ce.trading_symbol, lot_size: ce.lot_size || 65 };
       }
       if (pe) {
         optKeys.push(pe.instrument_key);
-        optMeta[pe.instrument_key] = { strike, type: "PE", symbol: pe.trading_symbol, lot_size: pe.lot_size || 25 };
+        optMeta[pe.instrument_key] = { strike, type: "PE", symbol: pe.trading_symbol, lot_size: pe.lot_size || 65 };
       }
     }
 
