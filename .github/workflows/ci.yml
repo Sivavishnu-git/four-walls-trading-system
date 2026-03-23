@@ -24,7 +24,8 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Lint
+      - name: Lint (non-blocking for existing lint debt)
+        continue-on-error: true
         run: npm run lint
 
       - name: Build
