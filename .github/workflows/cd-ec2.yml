@@ -68,8 +68,8 @@ jobs:
         run: |
           ssh -i ~/.ssh/ec2_key -o StrictHostKeyChecking=no "$EC2_USER@$EC2_HOST" << 'EOF'
           set -euo pipefail
-          cd /home/$USER/app || cd /home/ubuntu/app
-          npm install --production
+          cd "$HOME/app" || cd /home/ubuntu/app
+          npm install --omit=dev
 
           sudo cp deploy/nginx.conf /etc/nginx/sites-available/livetrading
           sudo ln -sf /etc/nginx/sites-available/livetrading /etc/nginx/sites-enabled/livetrading
@@ -81,5 +81,22 @@ jobs:
           pm2 start deploy/ecosystem.config.cjs
           pm2 save
 
-          curl -s -o /dev/null -w "API_STATUS:%{http_code}\n" http://127.0.0.1:3000/api/tools/discover-nifty-future
+          # Wait for backend to bind and warm up.
+          ok=0
+          for i in $(seq 1 20); do
+            code="$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/api/tools/discover-nifty-future || true)"
+            echo "API_STATUS:$code (attempt $i/20)"
+            if [ "$code" = "200" ]; then
+              ok=1
+              break
+            fi
+            sleep 3
+          done
+
+          if [ "$ok" -ne 1 ]; then
+            echo "API health check failed after retries"
+            pm2 status || true
+            pm2 logs livetrading --lines 80 --nostream || true
+            exit 1
+          fi
           EOF
