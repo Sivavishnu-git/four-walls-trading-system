@@ -10,7 +10,7 @@ import { API_BASE } from "../config";
 const DEFAULT_LOT_SIZE = 75;
 const BASE_URL = API_BASE;
 
-export const OrderPanel = ({ token, replayActive }) => {
+export const OrderPanel = ({ token }) => {
   const [atmData, setAtmData] = useState(null);
   const [positions, setPositions] = useState([]);
   const [orders, setOrders] = useState([]);
@@ -55,33 +55,23 @@ export const OrderPanel = ({ token, replayActive }) => {
     if (!token) return;
     setPosLoading(true);
     try {
-      const url = replayActive ? `${BASE_URL}/api/replay/orders` : `${BASE_URL}/api/portfolio/positions`;
-      const res = await fetch(url, { headers: authHeader });
+      const res = await fetch(`${BASE_URL}/api/portfolio/positions`, { headers: authHeader });
       const json = await res.json();
-      if (replayActive) {
-        setPositions(Array.isArray(json.positions) ? json.positions : []);
-      } else {
-        if (json.data) setPositions(Array.isArray(json.data) ? json.data : []);
-      }
+      if (json.data) setPositions(Array.isArray(json.data) ? json.data : []);
     } catch {}
     finally { setPosLoading(false); }
-  }, [token, replayActive]);
+  }, [token]);
 
   const fetchOrders = useCallback(async () => {
     if (!token) return;
     setOrderLoading(true);
     try {
-      const url = replayActive ? `${BASE_URL}/api/replay/orders` : `${BASE_URL}/api/order/book`;
-      const res = await fetch(url, { headers: authHeader });
+      const res = await fetch(`${BASE_URL}/api/order/book`, { headers: authHeader });
       const json = await res.json();
-      if (replayActive) {
-        setOrders(Array.isArray(json.orders) ? json.orders : []);
-      } else {
-        if (json.data) setOrders(Array.isArray(json.data) ? json.data : []);
-      }
+      if (json.data) setOrders(Array.isArray(json.data) ? json.data : []);
     } catch {}
     finally { setOrderLoading(false); }
-  }, [token, replayActive]);
+  }, [token]);
 
   const refreshAll = useCallback(() => {
     fetchATM();
@@ -130,8 +120,7 @@ export const OrderPanel = ({ token, replayActive }) => {
         disclosed_quantity: 0,
         is_amo: false,
       };
-      const orderUrl = replayActive ? `${BASE_URL}/api/replay/order` : `${BASE_URL}/api/order/place`;
-      const res = await fetch(orderUrl, {
+      const res = await fetch(`${BASE_URL}/api/order/place`, {
         method: "POST",
         headers: { ...authHeader, "Content-Type": "application/json" },
         body: JSON.stringify(body),

@@ -13,7 +13,9 @@ import { updateEnvToken } from "./utils/tokenManager.js";
 
 const gunzip = promisify(zlib.gunzip);
 
-dotenv.config();
+const rootDir = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.join(rootDir, ".env") });
+dotenv.config({ path: path.join(rootDir, ".env.local"), override: true });
 
 const app = express();
 app.use(cors());
@@ -56,7 +58,7 @@ const getMasterData = async (exchange) => {
   return allData.filter(i => i.segment === segment);
 };
 
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 const CLIENT_ID = process.env.UPSTOX_API_KEY;
 const CLIENT_SECRET = process.env.UPSTOX_API_SECRET;
 const REDIRECT_URI =
@@ -247,7 +249,10 @@ app.get("/api/tools/discover-nifty-future", async (req, res) => {
 
     res.json({
       status: "success",
-      data: currentFuture
+      data: {
+        ...currentFuture,
+        ...buildFuturePayload(currentFuture),
+      },
     });
   } catch (error) {
     console.error("Discovery Error:", error.message);
@@ -705,7 +710,7 @@ app.get("/api/atm-options", async (req, res) => {
         atm_strike: atm,
         expiry: nearestExpiry,
         expiry_date: new Date(nearestExpiry).toLocaleDateString("en-IN"),
-        future: { key: futKey, symbol: currentFuture.trading_symbol },
+        future: buildFuturePayload(currentFuture),
         options,
       },
     });
@@ -822,6 +827,86 @@ app.get("/api/option-chain", async (req, res) => {
   }
 });
 
+/** Minute-of-day in Asia/Kolkata (0–1439) for a candle timestamp */
+function istMinuteOfDay(isoTs) {
+  const d = new Date(isoTs);
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kolkata",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(d);
+  const h = parseInt(parts.find((p) => p.type === "hour")?.value || "0", 10);
+  const m = parseInt(parts.find((p) => p.type === "minute")?.value || "0", 10);
+  return h * 60 + m;
+}
+
+/**
+ * First 15 minutes of cash session: 9:15–9:30 IST (1-minute candles with open time 9:15 … 9:30).
+ * O/H/L/C = synthetic bar over that window.
+ */
+function buildOpening15mOhlc(sortedOneMinCandles) {
+  if (!sortedOneMinCandles?.length) return null;
+  const start = 9 * 60 + 15;
+  const end = 9 * 60 + 30;
+  const range = [];
+  for (const c of sortedOneMinCandles) {
+    const mod = istMinuteOfDay(c[0]);
+    if (mod >= start && mod <= end) range.push(c);
+  }
+  if (range.length === 0) return null;
+  const O = range[0][1];
+  const H = Math.max(...range.map((c) => c[2]));
+  const L = Math.min(...range.map((c) => c[3]));
+  const C = range[range.length - 1][4];
+  const sessionDate = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(range[0][0]));
+  const round2 = (x) => Math.round(Number(x) * 100) / 100;
+  return {
+    open: round2(O),
+    high: round2(H),
+    low: round2(L),
+    close: round2(C),
+    session_date: sessionDate,
+  };
+}
+
+/** e.g. "30 MAR 26" (IST) — rolls automatically with the current month future */
+function formatNiftyFutExpiryLabel(expiry) {
+  if (expiry == null) return "";
+  const d = new Date(expiry);
+  if (Number.isNaN(d.getTime())) return "";
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kolkata",
+    day: "2-digit",
+    month: "short",
+    year: "2-digit",
+  }).formatToParts(d);
+  const day = parts.find((p) => p.type === "day")?.value ?? "";
+  const month = (parts.find((p) => p.type === "month")?.value ?? "").toUpperCase();
+  const year = parts.find((p) => p.type === "year")?.value ?? "";
+  if (!day || !month) return "";
+  return `${day} ${month} ${year}`.trim();
+}
+
+function buildFuturePayload(currentFuture) {
+  const expiryLabel = formatNiftyFutExpiryLabel(currentFuture.expiry);
+  const displayName = expiryLabel
+    ? `NIFTY FUT ${expiryLabel}`
+    : currentFuture.trading_symbol;
+  return {
+    key: currentFuture.instrument_key,
+    symbol: currentFuture.trading_symbol,
+    expiry: currentFuture.expiry,
+    expiry_label: expiryLabel,
+    display_name: displayName,
+  };
+}
+
 // Trade Setup Endpoint — Fetches pivot data, intraday candles, live quote + ATM OI
 app.get("/api/trade-setup", async (req, res) => {
   try {
@@ -877,10 +962,12 @@ app.get("/api/trade-setup", async (req, res) => {
       }
     }
 
-    // Intraday 1-min candles → aggregate to 5-min
+    // Intraday 1-min candles → aggregate to 5-min + opening 15m OHLC (9:15–9:30 IST)
     let fiveMinCandles = [];
+    let opening15mOhlc = null;
     if (intradayRes.data?.data?.candles) {
       const sorted = intradayRes.data.data.candles.sort((a, b) => new Date(a[0]) - new Date(b[0]));
+      opening15mOhlc = buildOpening15mOhlc(sorted);
       for (let i = 0; i < sorted.length; i += 5) {
         const batch = sorted.slice(i, i + 5);
         if (batch.length === 0) continue;
@@ -960,9 +1047,10 @@ app.get("/api/trade-setup", async (req, res) => {
     res.json({
       status: "success",
       data: {
-        future: { key: futKey, symbol: currentFuture.trading_symbol },
+        future: buildFuturePayload(currentFuture),
         pivots,
         five_min_candles: fiveMinCandles,
+        opening_15m_ohlc: opening15mOhlc,
         live: liveQuote,
         atm_oi: atmOI,
       },
@@ -971,323 +1059,6 @@ app.get("/api/trade-setup", async (req, res) => {
     console.error("Trade Setup Error:", error.message);
     res.status(500).json({ error: error.message });
   }
-});
-
-// ========================
-// HISTORICAL REPLAY ENGINE
-// ========================
-// Per-session replay storage keyed by access token (or IP as fallback)
-const REPLAY_SESSIONS = new Map();
-
-const getReplayKey = (req) => {
-  const rawAuth = (req.headers.authorization || "").replace("Bearer ", "").trim();
-  if (rawAuth) return rawAuth;
-  return req.ip || "anonymous";
-};
-
-const getOrCreateReplay = (key) => {
-  if (!REPLAY_SESSIONS.has(key)) {
-    REPLAY_SESSIONS.set(key, {
-      active: false,
-      candles: [],
-      position: 0,
-      speed: 1,
-      playing: false,
-      date: null,
-      pivots: null,
-      paperOrders: [],
-      paperPositions: [],
-      timer: null,
-      futKey: null,
-      futSymbol: null,
-    });
-  }
-  return REPLAY_SESSIONS.get(key);
-};
-
-app.post("/api/replay/start", async (req, res) => {
-  try {
-    const { date } = req.body;
-    if (!date) return res.status(400).json({ error: "date is required (YYYY-MM-DD)" });
-    const token = (req.headers.authorization || "").replace("Bearer ", "") || process.env.UPSTOX_ACCESS_TOKEN;
-    const master = await loadCompleteData();
-    const today = new Date();
-    const niftyFutures = master.filter(i =>
-      i.segment === "NSE_FO" && i.name === "NIFTY" && i.instrument_type === "FUT" &&
-      new Date(i.expiry) >= today
-    ).sort((a, b) => new Date(a.expiry) - new Date(b.expiry));
-    const fut = niftyFutures[0];
-    if (!fut) return res.status(500).json({ error: "Could not find NIFTY FUT" });
-    const futKey = `NSE_FO|${fut.instrument_key || fut.token}`;
-
-    const dateObj = new Date(date);
-    const toStr = dateObj.toISOString().split("T")[0];
-    const prevDate = new Date(dateObj);
-    prevDate.setDate(prevDate.getDate() - 10);
-    const fromStr = prevDate.toISOString().split("T")[0];
-
-    const histRes = await axios.get(
-      `https://api.upstox.com/v2/historical-candle/${encodeURIComponent(futKey)}/1minute/${toStr}/${fromStr}`,
-      { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" } }
-    );
-    const allCandles = (histRes.data?.data?.candles || []).sort((a, b) => new Date(a[0]) - new Date(b[0]));
-    const dayCandles = allCandles.filter(c => c[0].startsWith(date));
-    if (dayCandles.length === 0) return res.status(400).json({ error: `No candle data for ${date}` });
-
-    const prevDayCandles = allCandles.filter(c => !c[0].startsWith(date));
-    let pivots = null;
-    if (prevDayCandles.length > 0) {
-      const last = prevDayCandles[prevDayCandles.length - 1];
-      const dayGroup = {};
-      prevDayCandles.forEach(c => {
-        const d = c[0].split("T")[0];
-        if (!dayGroup[d]) dayGroup[d] = [];
-        dayGroup[d].push(c);
-      });
-      const days = Object.keys(dayGroup).sort();
-      const prevDayKey = days[days.length - 1];
-      const pdc = dayGroup[prevDayKey];
-      if (pdc && pdc.length > 0) {
-        const H = Math.max(...pdc.map(c => c[2]));
-        const L = Math.min(...pdc.map(c => c[3]));
-        const C = pdc[pdc.length - 1][4];
-        const O = pdc[0][1];
-        const P = (H + L + C) / 3;
-        pivots = {
-          date: prevDayKey, O, H, L, C,
-          P: +P.toFixed(2),
-          R1: +(2 * P - L).toFixed(2), S1: +(2 * P - H).toFixed(2),
-          R2: +(P + (H - L)).toFixed(2), S2: +(P - (H - L)).toFixed(2),
-          R3: +(H + 2 * (P - L)).toFixed(2), S3: +(L - 2 * (H - P)).toFixed(2),
-        };
-      }
-    }
-
-    const replayKey = getReplayKey(req);
-    const REPLAY = getOrCreateReplay(replayKey);
-
-    REPLAY.active = true;
-    REPLAY.candles = dayCandles;
-    REPLAY.position = 0;
-    REPLAY.speed = 1;
-    REPLAY.playing = false;
-    REPLAY.date = date;
-    REPLAY.pivots = pivots;
-    REPLAY.paperOrders = [];
-    REPLAY.paperPositions = [];
-    REPLAY.futKey = futKey;
-    REPLAY.futSymbol = fut.trading_symbol;
-    if (REPLAY.timer) { clearInterval(REPLAY.timer); REPLAY.timer = null; }
-
-    res.json({
-      status: "success",
-      data: {
-        date, totalCandles: dayCandles.length,
-        startTime: dayCandles[0][0], endTime: dayCandles[dayCandles.length - 1][0],
-        pivots, futKey, futSymbol: fut.trading_symbol,
-      },
-    });
-  } catch (err) {
-    console.error("Replay start error:", err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post("/api/replay/control", (req, res) => {
-  const replayKey = getReplayKey(req);
-  const REPLAY = getOrCreateReplay(replayKey);
-  const { action, speed } = req.body;
-  if (!REPLAY.active) return res.status(400).json({ error: "No active replay session" });
-
-  switch (action) {
-    case "play":
-      REPLAY.playing = true;
-      if (REPLAY.timer) clearInterval(REPLAY.timer);
-      REPLAY.timer = setInterval(() => {
-        if (REPLAY.position < REPLAY.candles.length - 1) {
-          REPLAY.position++;
-        } else {
-          REPLAY.playing = false;
-          clearInterval(REPLAY.timer);
-          REPLAY.timer = null;
-        }
-      }, 1000 / REPLAY.speed);
-      break;
-    case "pause":
-      REPLAY.playing = false;
-      if (REPLAY.timer) { clearInterval(REPLAY.timer); REPLAY.timer = null; }
-      break;
-    case "step":
-      if (REPLAY.position < REPLAY.candles.length - 1) REPLAY.position++;
-      break;
-    case "step_back":
-      if (REPLAY.position > 0) REPLAY.position--;
-      break;
-    case "reset":
-      REPLAY.position = 0;
-      REPLAY.playing = false;
-      if (REPLAY.timer) { clearInterval(REPLAY.timer); REPLAY.timer = null; }
-      break;
-    case "stop":
-      REPLAY.active = false;
-      REPLAY.playing = false;
-      REPLAY.candles = [];
-      REPLAY.position = 0;
-      REPLAY.paperOrders = [];
-      REPLAY.paperPositions = [];
-      if (REPLAY.timer) { clearInterval(REPLAY.timer); REPLAY.timer = null; }
-      break;
-    case "speed":
-      if (speed) {
-        REPLAY.speed = speed;
-        if (REPLAY.playing && REPLAY.timer) {
-          clearInterval(REPLAY.timer);
-          REPLAY.timer = setInterval(() => {
-            if (REPLAY.position < REPLAY.candles.length - 1) REPLAY.position++;
-            else { REPLAY.playing = false; clearInterval(REPLAY.timer); REPLAY.timer = null; }
-          }, 1000 / REPLAY.speed);
-        }
-      }
-      break;
-    case "goto": {
-      const pos = req.body.position;
-      if (pos != null && pos >= 0 && pos < REPLAY.candles.length) REPLAY.position = pos;
-      break;
-    }
-    default:
-      return res.status(400).json({ error: `Unknown action: ${action}` });
-  }
-  const candle = REPLAY.candles[REPLAY.position];
-  res.json({
-    status: "success",
-    data: {
-      active: REPLAY.active, playing: REPLAY.playing, speed: REPLAY.speed,
-      position: REPLAY.position, total: REPLAY.candles.length,
-      currentTime: candle?.[0], currentPrice: candle?.[4],
-    },
-  });
-});
-
-app.get("/api/replay/status", (req, res) => {
-  const replayKey = getReplayKey(req);
-  const REPLAY = getOrCreateReplay(replayKey);
-  if (!REPLAY.active) return res.json({ status: "success", data: { active: false } });
-  const candle = REPLAY.candles[REPLAY.position];
-  res.json({
-    status: "success",
-    data: {
-      active: true, playing: REPLAY.playing, speed: REPLAY.speed,
-      position: REPLAY.position, total: REPLAY.candles.length,
-      date: REPLAY.date, currentTime: candle?.[0], currentPrice: candle?.[4],
-    },
-  });
-});
-
-app.get("/api/replay/quotes", (req, res) => {
-  const replayKey = getReplayKey(req);
-  const REPLAY = getOrCreateReplay(replayKey);
-  if (!REPLAY.active || REPLAY.candles.length === 0) return res.json({ data: {} });
-  const c = REPLAY.candles[REPLAY.position];
-  const key = REPLAY.futKey;
-  res.json({
-    data: {
-      [key]: {
-        last_price: c[4], open: c[1], high: c[2], low: c[3], close: c[4],
-        oi: c[6] || 0, volume: c[5] || 0, symbol: REPLAY.futSymbol, timestamp: c[0],
-      },
-    },
-  });
-});
-
-app.get("/api/replay/trade-setup", (req, res) => {
-  const replayKey = getReplayKey(req);
-  const REPLAY = getOrCreateReplay(replayKey);
-  if (!REPLAY.active || REPLAY.candles.length === 0)
-    return res.status(400).json({ error: "No active replay" });
-
-  const visibleCandles = REPLAY.candles.slice(0, REPLAY.position + 1);
-  const fiveMinCandles = [];
-  for (let i = 0; i < visibleCandles.length; i += 5) {
-    const chunk = visibleCandles.slice(i, i + 5);
-    if (chunk.length === 0) continue;
-    fiveMinCandles.push({
-      time: chunk[0][0],
-      open: chunk[0][1],
-      high: Math.max(...chunk.map(c => c[2])),
-      low: Math.min(...chunk.map(c => c[3])),
-      close: chunk[chunk.length - 1][4],
-      volume: chunk.reduce((s, c) => s + (c[5] || 0), 0),
-      oi: chunk[chunk.length - 1][6] || 0,
-    });
-  }
-
-  const current = visibleCandles[visibleCandles.length - 1];
-  res.json({
-    status: "success",
-    data: {
-      future: { key: REPLAY.futKey, symbol: REPLAY.futSymbol },
-      pivots: REPLAY.pivots,
-      five_min_candles: fiveMinCandles,
-      live: {
-        last_price: current[4], open: current[1], high: current[2],
-        low: current[3], close: current[4], oi: current[6] || 0,
-        volume: current[5] || 0,
-      },
-      replay: {
-        position: REPLAY.position, total: REPLAY.candles.length,
-        time: current[0], playing: REPLAY.playing,
-      },
-    },
-  });
-});
-
-app.post("/api/replay/order", (req, res) => {
-  const replayKey = getReplayKey(req);
-  const REPLAY = getOrCreateReplay(replayKey);
-  if (!REPLAY.active) return res.status(400).json({ error: "No active replay" });
-  const { instrument_token, transaction_type, quantity, order_type, price } = req.body;
-  const candle = REPLAY.candles[REPLAY.position];
-  const fillPrice = order_type === "MARKET" ? candle[4] : (price || candle[4]);
-  const order = {
-    order_id: `PAPER-${Date.now()}`,
-    instrument_token,
-    transaction_type,
-    quantity,
-    order_type,
-    price: fillPrice,
-    status: "complete",
-    timestamp: candle[0],
-  };
-  REPLAY.paperOrders.push(order);
-  const existingPos = REPLAY.paperPositions.find(p => p.instrument_token === instrument_token);
-  const qty = transaction_type === "BUY" ? quantity : -quantity;
-  if (existingPos) {
-    existingPos.quantity += qty;
-    if (existingPos.quantity === 0) {
-      REPLAY.paperPositions = REPLAY.paperPositions.filter(p => p.instrument_token !== instrument_token);
-    }
-  } else {
-    REPLAY.paperPositions.push({
-      instrument_token, quantity: qty, average_price: fillPrice, last_price: fillPrice,
-    });
-  }
-  res.json({ status: "success", data: { order_id: order.order_id, message: "Paper order filled" } });
-});
-
-app.get("/api/replay/orders", (req, res) => {
-  const replayKey = getReplayKey(req);
-  const REPLAY = getOrCreateReplay(replayKey);
-  if (REPLAY.active) {
-    REPLAY.paperPositions.forEach(p => {
-      const candle = REPLAY.candles[REPLAY.position];
-      if (candle) p.last_price = candle[4];
-    });
-  }
-  res.json({
-    status: "success",
-    orders: REPLAY.paperOrders,
-    positions: REPLAY.paperPositions,
-  });
 });
 
 // In production, serve the built React frontend

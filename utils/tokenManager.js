@@ -5,16 +5,31 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const projectRoot = path.join(__dirname, '..');
+
+/** Prefer .env.local when present (local-only Upstox app), else .env */
+function resolveEnvPath() {
+    const localPath = path.join(projectRoot, '.env.local');
+    const basePath = path.join(projectRoot, '.env');
+    if (fs.existsSync(localPath)) return localPath;
+    return basePath;
+}
+
 /**
- * Updates the .env file with a new access token
+ * Updates the env file with a new access token (writes to .env.local if it exists)
  * @param {string} newToken - The new access token to save
  */
 export function updateEnvToken(newToken) {
     try {
-        const envPath = path.join(__dirname, '..', '.env');
+        const envPath = resolveEnvPath();
 
-        // Read current .env file
-        let envContent = fs.readFileSync(envPath, 'utf8');
+        // Read current env file (create empty if missing)
+        let envContent = '';
+        try {
+            envContent = fs.readFileSync(envPath, 'utf8');
+        } catch {
+            envContent = '';
+        }
 
         // Update both token variables
         const tokenRegex = /^(UPSTOX_ACCESS_TOKEN|VITE_UPSTOX_ACCESS_TOKEN)=.*$/gm;
@@ -50,7 +65,7 @@ export function updateEnvToken(newToken) {
  */
 export function getCurrentToken() {
     try {
-        const envPath = path.join(__dirname, '..', '.env');
+        const envPath = resolveEnvPath();
         const envContent = fs.readFileSync(envPath, 'utf8');
 
         const match = envContent.match(/^UPSTOX_ACCESS_TOKEN=(.*)$/m);

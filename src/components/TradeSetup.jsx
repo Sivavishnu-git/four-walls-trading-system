@@ -152,7 +152,7 @@ const generateTradeSignal = (trend, phase, position, atmOI, ltp, pivots) => {
   return signals;
 };
 
-export const TradeSetup = ({ token, replayActive }) => {
+export const TradeSetup = ({ token }) => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -165,8 +165,7 @@ export const TradeSetup = ({ token, replayActive }) => {
     setLoading(true);
     setError(null);
     try {
-      const endpoint = replayActive ? `${API_BASE}/api/replay/trade-setup` : `${API_BASE}/api/trade-setup`;
-      const res = await fetch(endpoint, {
+      const res = await fetch(`${API_BASE}/api/trade-setup`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const json = await res.json();
@@ -181,7 +180,7 @@ export const TradeSetup = ({ token, replayActive }) => {
     } finally {
       setLoading(false);
     }
-  }, [token, replayActive]);
+  }, [token]);
 
   useEffect(() => {
     fetchSetup();
@@ -237,7 +236,7 @@ export const TradeSetup = ({ token, replayActive }) => {
           </h2>
           {data?.future && (
             <span style={{ background: "rgba(41,98,255,0.15)", border: "1px solid rgba(41,98,255,0.3)", padding: "4px 10px", borderRadius: "4px", color: "#2962ff", fontSize: "0.8rem", fontWeight: 600 }}>
-              {data.future.symbol}
+              {data.future.display_name || data.future.symbol}
             </span>
           )}
           {live && (

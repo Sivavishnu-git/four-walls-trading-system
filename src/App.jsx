@@ -6,7 +6,6 @@ import { HistoricalData } from "./components/HistoricalData";
 import { OptionChain } from "./components/OptionChain";
 import { TradeSetup } from "./components/TradeSetup";
 import { OrderPanel } from "./components/OrderPanel";
-import { ReplayController } from "./components/ReplayController";
 import { TradingViewChart } from "./components/TradingViewChart";
 
 class TabErrorBoundary extends React.Component {
@@ -50,7 +49,8 @@ function App() {
   );
   const [instrumentSymbol, setInstrumentSymbol] = useState("");
   const [page, setPage] = useState("oi");
-  const [replayState, setReplayState] = useState(null);
+  const [niftyFutLtp, setNiftyFutLtp] = useState(null);
+  const [niftyFutChange, setNiftyFutChange] = useState(null);
 
   useEffect(() => {
     fetch(`${API_BASE}/api/tools/discover-nifty-future`)
@@ -58,11 +58,52 @@ function App() {
       .then((json) => {
         if (json.status === "success" && json.data?.instrument_key) {
           setInstrumentKey(json.data.instrument_key);
-          setInstrumentSymbol(json.data.trading_symbol || "");
+          setInstrumentSymbol(json.data.display_name || json.data.trading_symbol || "");
         }
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!accessToken || accessToken.length < 20 || !instrumentKey) {
+      setNiftyFutLtp(null);
+      setNiftyFutChange(null);
+      return;
+    }
+    const token = accessToken.replace(/^Bearer\s+/i, "").trim();
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const res = await fetch(
+          `${API_BASE}/api/quotes?instrument_keys=${encodeURIComponent(instrumentKey)}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              Accept: "application/json",
+            },
+          },
+        );
+        const json = await res.json();
+        if (cancelled || !json?.data) return;
+        const quote = json.data[instrumentKey] || Object.values(json.data)[0];
+        if (quote && typeof quote.last_price === "number") {
+          setNiftyFutLtp(quote.last_price);
+          setNiftyFutChange(typeof quote.net_change === "number" ? quote.net_change : null);
+        }
+      } catch {
+        if (!cancelled) {
+          setNiftyFutLtp(null);
+          setNiftyFutChange(null);
+        }
+      }
+    };
+    tick();
+    const id = setInterval(tick, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [accessToken, instrumentKey]);
 
   const handleLogin = () => {
     window.location.href = AUTH_LOGIN_URL;
@@ -123,6 +164,35 @@ function App() {
               {instrumentSymbol}
             </span>
           )}
+          {niftyFutLtp != null && (
+            <span
+              title="NIFTY future last traded price (LTP)"
+              style={{
+                display: "flex",
+                alignItems: "baseline",
+                gap: "8px",
+                fontFamily: "ui-monospace, monospace",
+                fontSize: "1.05rem",
+                fontWeight: 700,
+                color: "#fff",
+              }}
+            >
+              <span style={{ color: "#888", fontSize: "0.7rem", fontWeight: 600 }}>LTP</span>
+              {niftyFutLtp.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              {niftyFutChange != null && (
+                <span
+                  style={{
+                    fontSize: "0.85rem",
+                    fontWeight: 600,
+                    color: niftyFutChange >= 0 ? "#26a69a" : "#ef5350",
+                  }}
+                >
+                  {niftyFutChange >= 0 ? "+" : ""}
+                  {niftyFutChange.toFixed(2)}
+                </span>
+              )}
+            </span>
+          )}
           <button
             onClick={handleLogin}
             style={{
@@ -145,10 +215,6 @@ function App() {
         </div>
       </div>
 
-      <div style={{ padding: "8px 16px", flexShrink: 0, background: "#131722" }}>
-        <ReplayController token={accessToken} onReplayStateChange={setReplayState} />
-      </div>
-
       <div style={{ flex: 1, overflow: "auto", position: "relative" }}>
         <div style={{ display: page === "oi" ? "block" : "none", height: "100%", overflow: "auto" }}>
           <TabErrorBoundary><OIMonitor token={accessToken} instrumentKey={instrumentKey} /></TabErrorBoundary>
@@ -160,15 +226,15 @@ function App() {
           <TabErrorBoundary><OptionChain token={accessToken} /></TabErrorBoundary>
         </div>
         <div style={{ display: page === "tradesetup" ? "block" : "none", height: "100%", overflow: "auto" }}>
-          <TabErrorBoundary><TradeSetup token={accessToken} replayActive={replayState?.active} /></TabErrorBoundary>
+          <TabErrorBoundary><TradeSetup token={accessToken} /></TabErrorBoundary>
         </div>
         <div style={{ display: page === "chart" ? "block" : "none", height: "100%", overflow: "hidden" }}>
           {page === "chart" && (
-            <TabErrorBoundary><TradingViewChart token={accessToken} replayActive={replayState?.active} /></TabErrorBoundary>
+            <TabErrorBoundary><TradingViewChart token={accessToken} /></TabErrorBoundary>
           )}
         </div>
         <div style={{ display: page === "orders" ? "block" : "none", height: "100%", overflow: "auto" }}>
-          <TabErrorBoundary><OrderPanel token={accessToken} replayActive={replayState?.active} /></TabErrorBoundary>
+          <TabErrorBoundary><OrderPanel token={accessToken} /></TabErrorBoundary>
         </div>
       </div>
     </div>

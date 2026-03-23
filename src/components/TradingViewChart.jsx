@@ -31,7 +31,7 @@ const calculatePivots = (high, low, close) => {
   };
 };
 
-export const TradingViewChart = ({ token, replayActive }) => {
+export const TradingViewChart = ({ token }) => {
   const chartContainerRef = useRef(null);
   const chartRef = useRef(null);
   const candleSeriesRef = useRef(null);
@@ -52,6 +52,9 @@ export const TradingViewChart = ({ token, replayActive }) => {
   const [inputLow, setInputLow] = useState(() => localStorage.getItem("pivot_low") || "");
   const [inputClose, setInputClose] = useState(() => localStorage.getItem("pivot_close") || "");
   const [showInput, setShowInput] = useState(true);
+
+  /** Avoid re-applying opening OHLC on every 15s poll; reset when session_date changes (new day). */
+  const lastOpeningSessionRef = useRef(null);
 
   const initChart = useCallback(() => {
     if (!chartContainerRef.current || chartRef.current) return;
@@ -156,30 +159,18 @@ export const TradingViewChart = ({ token, replayActive }) => {
     }
   }, [showPivots]);
 
-  const applyPivots = () => {
+  /** Recompute classic pivots from displayed OHLC (H/L/C) and redraw horizontal PP, R1–R3, S1–S3 on the chart. */
+  const applyPivots = useCallback(() => {
+    if (!inputHigh || !inputLow || !inputClose) return;
     const pivots = calculatePivots(inputHigh, inputLow, inputClose);
-    if (pivots) {
-      setPivotData(pivots);
-      drawPivotLines(pivots);
-      localStorage.setItem("pivot_open", inputOpen);
-      localStorage.setItem("pivot_high", inputHigh);
-      localStorage.setItem("pivot_low", inputLow);
-      localStorage.setItem("pivot_close", inputClose);
-    }
-  };
-
-  const clearPivots = () => {
-    setPivotData(null);
-    drawPivotLines(null);
-    setInputOpen("");
-    setInputHigh("");
-    setInputLow("");
-    setInputClose("");
-    localStorage.removeItem("pivot_open");
-    localStorage.removeItem("pivot_high");
-    localStorage.removeItem("pivot_low");
-    localStorage.removeItem("pivot_close");
-  };
+    if (!pivots) return;
+    setPivotData(pivots);
+    drawPivotLines(pivots);
+    if (inputOpen) localStorage.setItem("pivot_open", inputOpen);
+    localStorage.setItem("pivot_high", inputHigh);
+    localStorage.setItem("pivot_low", inputLow);
+    localStorage.setItem("pivot_close", inputClose);
+  }, [inputOpen, inputHigh, inputLow, inputClose, drawPivotLines]);
 
   useEffect(() => {
     const h = localStorage.getItem("pivot_high");
@@ -199,11 +190,7 @@ export const TradingViewChart = ({ token, replayActive }) => {
     setLoading(true);
 
     try {
-      const endpoint = replayActive
-        ? `${API_BASE}/api/replay/trade-setup`
-        : `${API_BASE}/api/trade-setup`;
-
-      const res = await fetch(endpoint, {
+      const res = await fetch(`${API_BASE}/api/trade-setup`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const json = await res.json();
@@ -213,9 +200,34 @@ export const TradingViewChart = ({ token, replayActive }) => {
         return;
       }
 
-      const { five_min_candles, future } = json.data;
+      const { five_min_candles, future, opening_15m_ohlc: opening15m } = json.data;
 
-      if (future?.symbol) setFutSymbol(future.symbol);
+      if (future?.display_name) setFutSymbol(future.display_name);
+      else if (future?.symbol) setFutSymbol(future.symbol);
+
+      if (
+        opening15m?.session_date &&
+        lastOpeningSessionRef.current !== opening15m.session_date
+      ) {
+        lastOpeningSessionRef.current = opening15m.session_date;
+        const oStr = String(opening15m.open);
+        const hStr = String(opening15m.high);
+        const lStr = String(opening15m.low);
+        const cStr = String(opening15m.close);
+        setInputOpen(oStr);
+        setInputHigh(hStr);
+        setInputLow(lStr);
+        setInputClose(cStr);
+        localStorage.setItem("pivot_open", oStr);
+        localStorage.setItem("pivot_high", hStr);
+        localStorage.setItem("pivot_low", lStr);
+        localStorage.setItem("pivot_close", cStr);
+        const pivots = calculatePivots(hStr, lStr, cStr);
+        if (pivots) {
+          setPivotData(pivots);
+          drawPivotLines(pivots);
+        }
+      }
 
       if (five_min_candles && five_min_candles.length > 0 && candleSeriesRef.current) {
         const candleData = five_min_candles.map((c) => {
@@ -251,7 +263,7 @@ export const TradingViewChart = ({ token, replayActive }) => {
     } finally {
       setLoading(false);
     }
-  }, [token, replayActive, drawPivotLines, pivotData]);
+  }, [token, drawPivotLines, pivotData]);
 
   useEffect(() => { fetchData(); }, []);
 
@@ -266,10 +278,6 @@ export const TradingViewChart = ({ token, replayActive }) => {
     return () => clearInterval(timerRef.current);
   }, [autoRefresh, fetchData]);
 
-  const handleKeyDown = (e) => {
-    if (e.key === "Enter") applyPivots();
-  };
-
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: "#131722" }}>
       {/* Toolbar */}
@@ -282,11 +290,6 @@ export const TradingViewChart = ({ token, replayActive }) => {
             {futSymbol || "NIFTY FUT"}
           </span>
           <span style={{ color: "#888", fontSize: "0.8rem" }}>5 min</span>
-          {replayActive && (
-            <span style={{ color: "#ff9800", fontSize: "0.75rem", fontWeight: 700, background: "rgba(255,152,0,0.15)", padding: "2px 8px", borderRadius: "4px" }}>
-              REPLAY
-            </span>
-          )}
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -339,41 +342,35 @@ export const TradingViewChart = ({ token, replayActive }) => {
           borderBottom: "1px solid rgba(42,46,57,0.3)", flexShrink: 0, flexWrap: "wrap",
           background: "rgba(41,98,255,0.03)",
         }}>
-          <span style={{ color: "#2962ff", fontSize: "0.78rem", fontWeight: 700 }}>Previous Day OHLC:</span>
+          <span style={{ color: "#2962ff", fontSize: "0.78rem", fontWeight: 700 }}>
+            Opening 15m OHLC (9:15–9:30 IST)
+          </span>
+          <span style={{ color: "#666", fontSize: "0.72rem" }}>
+            Auto-filled from NIFTY fut 1m data (read-only)
+          </span>
 
           <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
             <label style={labelStyle}>O</label>
-            <input type="number" value={inputOpen} onChange={e => setInputOpen(e.target.value)}
-              onKeyDown={handleKeyDown} placeholder="Open" style={ohlcInput} />
+            <input type="text" readOnly tabIndex={-1} value={inputOpen} placeholder="—" style={ohlcInputReadOnly} />
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
             <label style={labelStyle}>H</label>
-            <input type="number" value={inputHigh} onChange={e => setInputHigh(e.target.value)}
-              onKeyDown={handleKeyDown} placeholder="High" style={{ ...ohlcInput, borderColor: "rgba(239,83,80,0.3)" }} />
+            <input type="text" readOnly tabIndex={-1} value={inputHigh} placeholder="—" style={{ ...ohlcInputReadOnly, borderColor: "rgba(239,83,80,0.3)" }} />
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
             <label style={labelStyle}>L</label>
-            <input type="number" value={inputLow} onChange={e => setInputLow(e.target.value)}
-              onKeyDown={handleKeyDown} placeholder="Low" style={{ ...ohlcInput, borderColor: "rgba(38,166,154,0.3)" }} />
+            <input type="text" readOnly tabIndex={-1} value={inputLow} placeholder="—" style={{ ...ohlcInputReadOnly, borderColor: "rgba(38,166,154,0.3)" }} />
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
             <label style={labelStyle}>C</label>
-            <input type="number" value={inputClose} onChange={e => setInputClose(e.target.value)}
-              onKeyDown={handleKeyDown} placeholder="Close" style={ohlcInput} />
+            <input type="text" readOnly tabIndex={-1} value={inputClose} placeholder="—" style={ohlcInputReadOnly} />
           </div>
 
-          <button onClick={applyPivots} style={{
+          <button type="button" onClick={applyPivots} style={{
             padding: "6px 16px", borderRadius: "5px", cursor: "pointer", fontSize: "0.78rem", fontWeight: 700,
             background: "rgba(41,98,255,0.2)", border: "1px solid rgba(41,98,255,0.5)", color: "#2962ff",
           }}>
-            Calculate & Draw
-          </button>
-
-          <button onClick={clearPivots} style={{
-            padding: "6px 12px", borderRadius: "5px", cursor: "pointer", fontSize: "0.78rem", fontWeight: 600,
-            background: "rgba(239,83,80,0.1)", border: "1px solid rgba(239,83,80,0.3)", color: "#ef5350",
-          }}>
-            Clear
+            Calculate &amp; Draw
           </button>
         </div>
       )}
@@ -436,10 +433,11 @@ const btnStyle = {
   fontSize: "0.78rem", fontWeight: 600, display: "flex", alignItems: "center",
 };
 
-const ohlcInput = {
-  width: "90px", padding: "5px 8px", background: "rgba(255,255,255,0.05)",
-  border: "1px solid rgba(255,255,255,0.15)", borderRadius: "5px",
-  color: "#fff", fontSize: "0.82rem", outline: "none", fontFamily: "monospace",
+const ohlcInputReadOnly = {
+  width: "90px", padding: "5px 8px", background: "rgba(255,255,255,0.03)",
+  border: "1px solid rgba(255,255,255,0.12)", borderRadius: "5px",
+  color: "#ccc", fontSize: "0.82rem", outline: "none", fontFamily: "monospace",
+  cursor: "default", userSelect: "none",
 };
 
 const labelStyle = {
