@@ -11,17 +11,12 @@ import { API_BASE } from "../config";
 // import { OptionEntryPlanner } from './OptionEntryPlanner';
 
 export const OIMonitor = ({ token: propToken, instrumentKey: propInstrumentKey }) => {
-    const [token, setToken] = useState(
+    const token =
         propToken ||
         localStorage.getItem("upstox_access_token") ||
         import.meta.env.VITE_UPSTOX_ACCESS_TOKEN ||
-        "",
-    );
+        "";
     const [isLive, setIsLive] = useState(false);
-
-    useEffect(() => {
-        if (propToken) setToken(propToken);
-    }, [propToken]);
     const [oiHistory, setOiHistory] = useState([]);
     const [currentOI, setCurrentOI] = useState(null);
     const [oiChange, setOiChange] = useState(null);
@@ -164,9 +159,10 @@ export const OIMonitor = ({ token: propToken, instrumentKey: propInstrumentKey }
     useEffect(() => {
         if (token && !isLive) {
             console.log("Auto-connecting with token...");
-            handleConnect();
+            setIsLive(true);
+            connect();
         }
-    }, [token]);
+    }, [token, isLive, connect]);
 
     // NEW: Fetch Previous Day's OI for Daily Change Calculation
     const [previousDayOI, setPreviousDayOI] = useState(null);
@@ -267,7 +263,7 @@ export const OIMonitor = ({ token: propToken, instrumentKey: propInstrumentKey }
 
     const handleConnect = async () => {
         if (!token) {
-            alert("Please enter a valid Upstox Access Token.");
+            alert("Please login first to get a valid Upstox Access Token.");
             return;
         }
 
@@ -381,7 +377,7 @@ export const OIMonitor = ({ token: propToken, instrumentKey: propInstrumentKey }
 
                 <div className="header-right">
                     {!isLive ? (
-                        <button onClick={handleConnect} className="connect-btn">
+                        <button onClick={handleConnect} className="connect-btn" disabled={!token}>
                             Connect
                         </button>
                     ) : (

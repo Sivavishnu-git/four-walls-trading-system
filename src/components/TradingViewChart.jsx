@@ -42,6 +42,7 @@ export const TradingViewChart = ({ token, replayActive }) => {
   const [loading, setLoading] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [lastUpdate, setLastUpdate] = useState(null);
+  const [chartMessage, setChartMessage] = useState("");
   const [pivotData, setPivotData] = useState(null);
   const [showPivots, setShowPivots] = useState(true);
   const [futSymbol, setFutSymbol] = useState("");
@@ -191,7 +192,10 @@ export const TradingViewChart = ({ token, replayActive }) => {
   }, []);
 
   const fetchData = useCallback(async () => {
-    if (!token) return;
+    if (!token) {
+      setChartMessage("Token missing or expired. Please click Re-Login.");
+      return;
+    }
     setLoading(true);
 
     try {
@@ -204,7 +208,10 @@ export const TradingViewChart = ({ token, replayActive }) => {
       });
       const json = await res.json();
 
-      if (json.status !== "success" || !json.data) return;
+      if (json.status !== "success" || !json.data) {
+        setChartMessage(json.error || "Unable to load chart data. Please re-login.");
+        return;
+      }
 
       const { five_min_candles, future } = json.data;
 
@@ -234,9 +241,13 @@ export const TradingViewChart = ({ token, replayActive }) => {
         if (candleData.length > 0) {
           chartRef.current?.timeScale().scrollToPosition(3, false);
         }
+        setChartMessage("");
+      } else {
+        setChartMessage("No 5-min candle data available for current mode/date.");
       }
     } catch (err) {
       console.error("Chart data error:", err.message);
+      setChartMessage("Chart request failed. Check token or network.");
     } finally {
       setLoading(false);
     }
@@ -388,7 +399,34 @@ export const TradingViewChart = ({ token, replayActive }) => {
       )}
 
       {/* Chart */}
-      <div ref={chartContainerRef} style={{ flex: 1, minHeight: 0 }} />
+      <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
+        <div ref={chartContainerRef} style={{ height: "100%" }} />
+        {chartMessage && !loading && (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              pointerEvents: "none",
+            }}
+          >
+            <div
+              style={{
+                padding: "10px 14px",
+                borderRadius: "8px",
+                background: "rgba(0,0,0,0.5)",
+                border: "1px solid rgba(255,255,255,0.15)",
+                color: "#ccc",
+                fontSize: "0.85rem",
+              }}
+            >
+              {chartMessage}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
