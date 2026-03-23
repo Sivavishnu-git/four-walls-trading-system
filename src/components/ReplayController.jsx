@@ -17,26 +17,34 @@ export const ReplayController = ({ token, onReplayStateChange }) => {
   const [error, setError] = useState(null);
   const pollRef = useRef(null);
 
-  const authHeader = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
-
   const fetchStatus = useCallback(async () => {
+    if (!token) return;
     try {
-      const res = await fetch(`${API_BASE}/api/replay/status`, { headers: authHeader });
+      const res = await fetch(`${API_BASE}/api/replay/status`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      });
       const json = await res.json();
       const data = json.data || json;
       setStatus(data);
       if (onReplayStateChange) onReplayStateChange(data);
     } catch {}
-  }, [authHeader, onReplayStateChange]);
+  }, [token, onReplayStateChange]);
 
   useEffect(() => {
+    if (!token) {
+      if (pollRef.current) clearInterval(pollRef.current);
+      return;
+    }
     fetchStatus();
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(fetchStatus, 1000);
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [fetchStatus]);
+  }, [token, fetchStatus]);
 
   const startReplay = async () => {
     if (!token) { setError("Login first"); return; }
@@ -45,7 +53,10 @@ export const ReplayController = ({ token, onReplayStateChange }) => {
     try {
       const res = await fetch(`${API_BASE}/api/replay/start`, {
         method: "POST",
-        headers: authHeader,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({ date: replayDate }),
       });
       const json = await res.json();
@@ -63,7 +74,10 @@ export const ReplayController = ({ token, onReplayStateChange }) => {
     try {
       await fetch(`${API_BASE}/api/replay/control`, {
         method: "POST",
-        headers: authHeader,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({ action, ...extra }),
       });
       fetchStatus();
