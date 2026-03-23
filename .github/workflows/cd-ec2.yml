@@ -1,0 +1,86 @@
+name: CD to EC2
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: cd-ec2-main
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      EC2_HOST: ${{ secrets.EC2_HOST }}
+      EC2_USER: ${{ secrets.EC2_USER }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build app
+        run: npm run build
+
+      - name: Install SSH/rsync tools
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y rsync openssh-client
+
+      - name: Prepare SSH key
+        run: |
+          if [ -z "${{ secrets.EC2_SSH_KEY }}" ]; then
+            echo "EC2_SSH_KEY secret is not set"; exit 1
+          fi
+          mkdir -p ~/.ssh
+          printf "%s\n" "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/ec2_key
+          chmod 600 ~/.ssh/ec2_key
+          if [ -z "$EC2_USER" ]; then
+            echo "EC2_USER not set. Defaulting to ubuntu."
+            echo "EC2_USER=ubuntu" >> "$GITHUB_ENV"
+          fi
+          if [ -z "$EC2_HOST" ]; then
+            echo "EC2_HOST secret is not set"; exit 1
+          fi
+
+      - name: Sync repo to EC2
+        run: |
+          rsync -avz --delete \
+            -e "ssh -i ~/.ssh/ec2_key -o StrictHostKeyChecking=no" \
+            --exclude node_modules \
+            --exclude .git \
+            --exclude .env \
+            --exclude logs \
+            --exclude .github \
+            ./ "$EC2_USER@$EC2_HOST:/home/$EC2_USER/app/"
+
+      - name: Deploy services on EC2
+        run: |
+          ssh -i ~/.ssh/ec2_key -o StrictHostKeyChecking=no "$EC2_USER@$EC2_HOST" << 'EOF'
+          set -euo pipefail
+          cd /home/$USER/app || cd /home/ubuntu/app
+          npm install --production
+
+          sudo cp deploy/nginx.conf /etc/nginx/sites-available/livetrading
+          sudo ln -sf /etc/nginx/sites-available/livetrading /etc/nginx/sites-enabled/livetrading
+          sudo rm -f /etc/nginx/sites-enabled/default
+          sudo nginx -t
+          sudo systemctl reload nginx
+
+          pm2 delete livetrading 2>/dev/null || true
+          pm2 start deploy/ecosystem.config.cjs
+          pm2 save
+
+          curl -s -o /dev/null -w "API_STATUS:%{http_code}\n" http://127.0.0.1:3000/api/tools/discover-nifty-future
+          EOF
