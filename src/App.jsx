@@ -163,7 +163,9 @@ function App() {
           <TabErrorBoundary><TradeSetup token={accessToken} replayActive={replayState?.active} /></TabErrorBoundary>
         </div>
         <div style={{ display: page === "chart" ? "block" : "none", height: "100%", overflow: "hidden" }}>
-          <TabErrorBoundary><TradingViewChart token={accessToken} replayActive={replayState?.active} /></TabErrorBoundary>
+          {page === "chart" && (
+            <TabErrorBoundary><TradingViewChart token={accessToken} replayActive={replayState?.active} /></TabErrorBoundary>
+          )}
         </div>
         <div style={{ display: page === "orders" ? "block" : "none", height: "100%", overflow: "auto" }}>
           <TabErrorBoundary><OrderPanel token={accessToken} replayActive={replayState?.active} /></TabErrorBoundary>
