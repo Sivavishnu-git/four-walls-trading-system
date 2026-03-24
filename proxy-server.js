@@ -10,6 +10,7 @@ import { fileURLToPath } from "url";
 import { promisify } from "util";
 import crypto from "crypto";
 import { updateEnvToken } from "./utils/tokenManager.js";
+import { computeIntradayPivots } from "./src/utils/intradayPivots.js";
 
 const gunzip = promisify(zlib.gunzip);
 
@@ -975,6 +976,16 @@ app.get("/api/option-chain", async (req, res) => {
   }
 });
 
+/** YYYY-MM-DD in Asia/Kolkata (NSE session calendar for API date params). */
+function formatDateIST(d) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+}
+
 /** Minute-of-day in Asia/Kolkata (0–1439) for a candle timestamp */
 function istMinuteOfDay(isoTs) {
   const d = new Date(isoTs);
@@ -990,36 +1001,51 @@ function istMinuteOfDay(isoTs) {
 }
 
 /**
- * First 15 minutes of cash session: 9:15–9:30 IST (1-minute candles with open time 9:15 … 9:30).
- * O/H/L/C = synthetic bar over that window.
+ * Single synthetic 15-minute OHLC per session day (IST), built from fifteen 1m bars.
+ * Window: 1m opens 9:16 … 9:30 IST (15 minutes of clock time; last 1m completes ~9:31).
+ * Upstox has no native 15m interval — this matches a 15m candle “forming” right after 9:30.
+ * - O = open of 9:16 bar
+ * - H / L = max high / min low across those 15 bars
+ * - C = close of 9:30 bar
+ * - volume = sum of volumes
+ * Picks the latest IST session date present in the feed (each trading day).
  */
 function buildOpening15mOhlc(sortedOneMinCandles) {
   if (!sortedOneMinCandles?.length) return null;
-  const start = 9 * 60 + 15;
+  const start = 9 * 60 + 16;
   const end = 9 * 60 + 30;
-  const range = [];
+  /** IST date -> candles whose open time falls in 9:16–9:30 IST */
+  const byDate = {};
   for (const c of sortedOneMinCandles) {
     const mod = istMinuteOfDay(c[0]);
-    if (mod >= start && mod <= end) range.push(c);
+    if (mod < start || mod > end) continue;
+    const sessionDate = formatDateIST(new Date(c[0]));
+    if (!byDate[sessionDate]) byDate[sessionDate] = [];
+    byDate[sessionDate].push(c);
   }
-  if (range.length === 0) return null;
+  const dates = Object.keys(byDate).sort();
+  if (dates.length === 0) return null;
+  const lastDate = dates[dates.length - 1];
+  const range = byDate[lastDate].sort((a, b) => new Date(a[0]) - new Date(b[0]));
   const O = range[0][1];
   const H = Math.max(...range.map((c) => c[2]));
   const L = Math.min(...range.map((c) => c[3]));
   const C = range[range.length - 1][4];
-  const sessionDate = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Kolkata",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date(range[0][0]));
+  const volume = range.reduce((s, c) => s + (Number(c[5]) || 0), 0);
+  const oiLast = range[range.length - 1][6];
   const round2 = (x) => Math.round(Number(x) * 100) / 100;
   return {
     open: round2(O),
     high: round2(H),
     low: round2(L),
     close: round2(C),
-    session_date: sessionDate,
+    volume: Math.round(volume),
+    oi_last: oiLast != null && !Number.isNaN(Number(oiLast)) ? Number(oiLast) : null,
+    bar_count: range.length,
+    session_date: lastDate,
+    /** When the 15m bar is fully known (after 9:30 1m closes) */
+    formation_time_ist: "09:31",
+    window_ist: "09:16–09:30",
   };
 }
 
@@ -1070,15 +1096,16 @@ app.get("/api/trade-setup", async (req, res) => {
     if (!currentFuture) return res.status(404).json({ error: "No Nifty Future found" });
 
     const futKey = currentFuture.instrument_key;
-    const today = new Date().toISOString().split("T")[0];
-    const fiveDaysAgo = new Date(Date.now() - 5 * 86400000).toISOString().split("T")[0];
+    const nowMs = Date.now();
+    const todayIST = formatDateIST(new Date(nowMs));
+    const fiveDaysAgoIST = formatDateIST(new Date(nowMs - 5 * 86400000));
 
-    // Fetch daily candles (for pivot), intraday 5-min candles, and live quote in parallel
+    // Fetch daily candles (for pivot), intraday 1m (multi-day for opening 15m + 5m agg), live quote
     const [dailyRes, intradayRes, quoteRes] = await Promise.all([
-      axios.get(`https://api.upstox.com/v2/historical-candle/${futKey}/day/${today}/${fiveDaysAgo}`, {
+      axios.get(`https://api.upstox.com/v2/historical-candle/${futKey}/day/${todayIST}/${fiveDaysAgoIST}`, {
         headers: { Authorization: accessToken, Accept: "application/json" }
       }).catch(e => ({ data: null, error: e.response?.data || e.message })),
-      axios.get(`https://api.upstox.com/v2/historical-candle/${futKey}/1minute/${today}/${today}`, {
+      axios.get(`https://api.upstox.com/v2/historical-candle/${futKey}/1minute/${todayIST}/${fiveDaysAgoIST}`, {
         headers: { Authorization: accessToken, Accept: "application/json" }
       }).catch(e => ({ data: null, error: e.response?.data || e.message })),
       axios.get(`https://api.upstox.com/v2/market-quote/quotes?instrument_key=${encodeURIComponent(futKey)}`, {
@@ -1090,23 +1117,23 @@ app.get("/api/trade-setup", async (req, res) => {
     let pivots = null;
     if (dailyRes.data?.data?.candles) {
       const candles = dailyRes.data.data.candles.sort((a, b) => new Date(a[0]) - new Date(b[0]));
-      const todayStr = new Date().toDateString();
-      // Find previous trading day (not today)
-      const prevDay = candles.filter(c => new Date(c[0]).toDateString() !== todayStr).pop();
+      // Previous completed session vs today in IST (not server local TZ)
+      const prevDay = candles.filter((c) => formatDateIST(new Date(c[0])) !== todayIST).pop();
       if (prevDay) {
         const [, O, H, L, C, V, OI] = prevDay;
-        const P = (H + L + C) / 3;
-        pivots = {
-          date: prevDay[0],
-          open: O, high: H, low: L, close: C, volume: V, oi: OI,
-          pp: Math.round(P * 100) / 100,
-          r1: Math.round((2 * P - L) * 100) / 100,
-          r2: Math.round((P + (H - L)) * 100) / 100,
-          r3: Math.round((H + 2 * (P - L)) * 100) / 100,
-          s1: Math.round((2 * P - H) * 100) / 100,
-          s2: Math.round((P - (H - L)) * 100) / 100,
-          s3: Math.round((L - 2 * (H - P)) * 100) / 100,
-        };
+        const levels = computeIntradayPivots(O, H, L, C);
+        if (levels) {
+          pivots = {
+            date: prevDay[0],
+            open: O,
+            high: H,
+            low: L,
+            close: C,
+            volume: V,
+            oi: OI,
+            ...levels,
+          };
+        }
       }
     }
 
@@ -1116,8 +1143,9 @@ app.get("/api/trade-setup", async (req, res) => {
     if (intradayRes.data?.data?.candles) {
       const sorted = intradayRes.data.data.candles.sort((a, b) => new Date(a[0]) - new Date(b[0]));
       opening15mOhlc = buildOpening15mOhlc(sorted);
-      for (let i = 0; i < sorted.length; i += 5) {
-        const batch = sorted.slice(i, i + 5);
+      const sortedToday = sorted.filter((c) => formatDateIST(new Date(c[0])) === todayIST);
+      for (let i = 0; i < sortedToday.length; i += 5) {
+        const batch = sortedToday.slice(i, i + 5);
         if (batch.length === 0) continue;
         fiveMinCandles.push({
           time: batch[0][0],

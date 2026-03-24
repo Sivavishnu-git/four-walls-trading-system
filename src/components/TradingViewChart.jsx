@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { createChart, ColorType, LineStyle, CandlestickSeries, HistogramSeries } from "lightweight-charts";
 import { RefreshCw, Calculator } from "lucide-react";
 import { API_BASE } from "../config";
+import { computeIntradayPivots } from "../utils/intradayPivots";
 
 const PIVOT_COLORS = {
   pp: { color: "#ff9800", label: "Pivot" },
@@ -11,24 +12,6 @@ const PIVOT_COLORS = {
   s1: { color: "#81c784", label: "S1" },
   s2: { color: "#26a69a", label: "S2" },
   s3: { color: "#00897b", label: "S3" },
-};
-
-const calculatePivots = (high, low, close) => {
-  const H = parseFloat(high);
-  const L = parseFloat(low);
-  const C = parseFloat(close);
-  if (isNaN(H) || isNaN(L) || isNaN(C) || H === 0) return null;
-
-  const P = (H + L + C) / 3;
-  return {
-    pp: Math.round(P * 100) / 100,
-    r1: Math.round((2 * P - L) * 100) / 100,
-    r2: Math.round((P + (H - L)) * 100) / 100,
-    r3: Math.round((H + 2 * (P - L)) * 100) / 100,
-    s1: Math.round((2 * P - H) * 100) / 100,
-    s2: Math.round((P - (H - L)) * 100) / 100,
-    s3: Math.round((L - 2 * (H - P)) * 100) / 100,
-  };
 };
 
 export const TradingViewChart = ({ token }) => {
@@ -51,6 +34,7 @@ export const TradingViewChart = ({ token }) => {
   const [inputHigh, setInputHigh] = useState(() => localStorage.getItem("pivot_high") || "");
   const [inputLow, setInputLow] = useState(() => localStorage.getItem("pivot_low") || "");
   const [inputClose, setInputClose] = useState(() => localStorage.getItem("pivot_close") || "");
+  const [inputVolume, setInputVolume] = useState(() => localStorage.getItem("pivot_volume") || "");
   const [showInput, setShowInput] = useState(true);
 
   /** Avoid re-applying opening OHLC on every 15s poll; reset when session_date changes (new day). */
@@ -159,10 +143,10 @@ export const TradingViewChart = ({ token }) => {
     }
   }, [showPivots]);
 
-  /** Recompute classic pivots from displayed OHLC (H/L/C) and redraw horizontal PP, R1–R3, S1–S3 on the chart. */
+  /** Intraday pivots from O/H/L/C — redraw PP, R1–R3, S1–S3 on the chart. */
   const applyPivots = useCallback(() => {
-    if (!inputHigh || !inputLow || !inputClose) return;
-    const pivots = calculatePivots(inputHigh, inputLow, inputClose);
+    if (!inputOpen || !inputHigh || !inputLow || !inputClose) return;
+    const pivots = computeIntradayPivots(inputOpen, inputHigh, inputLow, inputClose);
     if (!pivots) return;
     setPivotData(pivots);
     drawPivotLines(pivots);
@@ -173,11 +157,12 @@ export const TradingViewChart = ({ token }) => {
   }, [inputOpen, inputHigh, inputLow, inputClose, drawPivotLines]);
 
   useEffect(() => {
+    const o = localStorage.getItem("pivot_open");
     const h = localStorage.getItem("pivot_high");
     const l = localStorage.getItem("pivot_low");
     const c = localStorage.getItem("pivot_close");
-    if (h && l && c) {
-      const pivots = calculatePivots(h, l, c);
+    if (o && h && l && c) {
+      const pivots = computeIntradayPivots(o, h, l, c);
       if (pivots) setPivotData(pivots);
     }
   }, []);
@@ -214,15 +199,21 @@ export const TradingViewChart = ({ token }) => {
         const hStr = String(opening15m.high);
         const lStr = String(opening15m.low);
         const cStr = String(opening15m.close);
+        const vStr =
+          opening15m.volume != null && opening15m.volume !== ""
+            ? String(opening15m.volume)
+            : "";
         setInputOpen(oStr);
         setInputHigh(hStr);
         setInputLow(lStr);
         setInputClose(cStr);
+        setInputVolume(vStr);
         localStorage.setItem("pivot_open", oStr);
         localStorage.setItem("pivot_high", hStr);
         localStorage.setItem("pivot_low", lStr);
         localStorage.setItem("pivot_close", cStr);
-        const pivots = calculatePivots(hStr, lStr, cStr);
+        if (vStr) localStorage.setItem("pivot_volume", vStr);
+        const pivots = computeIntradayPivots(oStr, hStr, lStr, cStr);
         if (pivots) {
           setPivotData(pivots);
           drawPivotLines(pivots);
@@ -343,10 +334,10 @@ export const TradingViewChart = ({ token }) => {
           background: "rgba(41,98,255,0.03)",
         }}>
           <span style={{ color: "#2962ff", fontSize: "0.78rem", fontWeight: 700 }}>
-            Opening 15m OHLC (9:15–9:30 IST)
+            15m opening candle (9:16–9:30 IST → forms ~9:31)
           </span>
           <span style={{ color: "#666", fontSize: "0.72rem" }}>
-            Auto-filled from NIFTY fut 1m data (read-only)
+            One 15m OHLC per session day from 15×1m bars · O/H/L/C/V — NIFTY fut (read-only)
           </span>
 
           <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
@@ -364,6 +355,17 @@ export const TradingViewChart = ({ token }) => {
           <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
             <label style={labelStyle}>C</label>
             <input type="text" readOnly tabIndex={-1} value={inputClose} placeholder="—" style={ohlcInputReadOnly} />
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+            <label style={labelStyle}>Vol</label>
+            <input
+              type="text"
+              readOnly
+              tabIndex={-1}
+              value={inputVolume ? new Intl.NumberFormat("en-IN").format(Number(inputVolume)) : ""}
+              placeholder="—"
+              style={{ ...ohlcInputReadOnly, width: "110px" }}
+            />
           </div>
 
           <button type="button" onClick={applyPivots} style={{
@@ -390,6 +392,7 @@ export const TradingViewChart = ({ token }) => {
           {inputOpen && (
             <span style={{ fontSize: "0.72rem", color: "#555", marginLeft: "auto" }}>
               Source: O:{inputOpen} H:{inputHigh} L:{inputLow} C:{inputClose}
+              {inputVolume ? ` Vol:${new Intl.NumberFormat("en-IN").format(Number(inputVolume))}` : ""}
             </span>
           )}
         </div>
