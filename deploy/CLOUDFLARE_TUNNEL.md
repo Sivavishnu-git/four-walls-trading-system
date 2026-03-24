@@ -69,7 +69,7 @@ If the app runs on EC2 and you have the SSH key:
 
 ```powershell
 cd C:\path\to\LiveTrading
-.\deploy\Refresh-QuickTunnel.ps1 -PublicIp "YOUR_EC2_IP" -KeyPath "D:\path\to\your.pem"
+.\doc\Refresh-QuickTunnel.ps1 -PublicIp "YOUR_EC2_IP" -KeyPath "D:\path\to\your.pem"
 ```
 
 This SSHs in, restarts `cloudflared`, updates `/home/ubuntu/app/.env` (`UPSTOX_REDIRECT_URI`, `FRONTEND_URI`), and runs `pm2 restart livetrading --update-env`.  

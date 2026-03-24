@@ -5,7 +5,7 @@
   Requires: OpenSSH client, PEM key, Ubuntu user with the app under /home/ubuntu/app.
 
   Example:
-    .\deploy\Refresh-QuickTunnel.ps1 -PublicIp "1.2.3.4" -KeyPath "D:\keys\my.pem"
+    .\doc\Refresh-QuickTunnel.ps1 -PublicIp "1.2.3.4" -KeyPath "D:\keys\my.pem"
 
   Then set Upstox redirect URL to the printed .../api/auth/callback (script reminds you).
 #>
@@ -16,7 +16,8 @@ param(
     [string] $KeyPath,
     [string] $User = "ubuntu",
     [string] $AppDir = "/home/ubuntu/app",
-    [switch] $SkipEnvUpdate
+    [switch] $SkipEnvUpdate,
+    [switch] $Redeploy
 )
 
 $ErrorActionPreference = "Stop"
@@ -50,8 +51,9 @@ echo "TIMEOUT" >&2
 tail -40 "$LOG" >&2
 exit 1
 '@
+$remoteBash = $remoteBash -replace "`r",""
 
-Write-Host "SSH $User@$PublicIp — restarting cloudflared quick tunnel..." -ForegroundColor Cyan
+Write-Host "SSH $User@$PublicIp - restarting cloudflared quick tunnel..." -ForegroundColor Cyan
 $raw = $remoteBash | & ssh -i $KeyPath -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${User}@${PublicIp}" "bash -s" 2>&1
 if ($LASTEXITCODE -ne 0) {
     throw "Remote tunnel start failed: $raw"
@@ -68,7 +70,7 @@ Write-Host ""
 Write-Host "New tunnel base URL:" -ForegroundColor Green
 Write-Host "  $newUrl"
 Write-Host ""
-Write-Host "Upstox redirect (must match exactly):" -ForegroundColor Yellow
+Write-Host "Upstox redirect URL (must match exactly):" -ForegroundColor Yellow
 Write-Host "  $newUrl/api/auth/callback"
 Write-Host ""
 
@@ -77,31 +79,54 @@ if ($SkipEnvUpdate) {
     exit 0
 }
 
-$envRemote = @"
-set -e
-cd '$AppDir'
-if [ ! -f .env ]; then echo 'Missing .env in $AppDir' >&2; exit 1; fi
-if grep -q '^UPSTOX_REDIRECT_URI=' .env; then
-  sed -i 's|^UPSTOX_REDIRECT_URI=.*|UPSTOX_REDIRECT_URI=$newUrl/api/auth/callback|' .env
-else
-  echo 'UPSTOX_REDIRECT_URI=$newUrl/api/auth/callback' >> .env
-fi
-if grep -q '^FRONTEND_URI=' .env; then
-  sed -i 's|^FRONTEND_URI=.*|FRONTEND_URI=$newUrl|' .env
-else
-  echo 'FRONTEND_URI=$newUrl' >> .env
-fi
-sudo -u ubuntu pm2 restart livetrading --update-env
-grep -nE '^(UPSTOX_REDIRECT_URI|FRONTEND_URI)=' .env
-"@
+$envRemote = @(
+    'set -e'
+    ("cd '{0}'" -f $AppDir)
+    ("if [ ! -f .env ]; then echo 'Missing .env in {0}'; exit 1; fi" -f $AppDir)
+    "if grep -q '^UPSTOX_REDIRECT_URI=' .env; then"
+    ("  sed -i 's|^UPSTOX_REDIRECT_URI=.*|UPSTOX_REDIRECT_URI={0}/api/auth/callback|' .env" -f $newUrl)
+    'else'
+    ("  echo 'UPSTOX_REDIRECT_URI={0}/api/auth/callback' >> .env" -f $newUrl)
+    'fi'
+    "if grep -q '^FRONTEND_URI=' .env; then"
+    ("  sed -i 's|^FRONTEND_URI=.*|FRONTEND_URI={0}|' .env" -f $newUrl)
+    'else'
+    ("  echo 'FRONTEND_URI={0}' >> .env" -f $newUrl)
+    'fi'
+    'sudo -u ubuntu pm2 restart livetrading --update-env'
+    "grep -nE '^(UPSTOX_REDIRECT_URI|FRONTEND_URI)=' .env"
+) -join "`n"
+$envRemote = $envRemote -replace "`r",""
 
 Write-Host "Updating $AppDir/.env and restarting PM2..." -ForegroundColor Cyan
-# Pass URL without PowerShell mangling — use base64 for the remote script
 $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($envRemote))
 $runEnv = "echo $b64 | base64 -d | bash"
 & ssh -i $KeyPath -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${User}@${PublicIp}" $runEnv
 if ($LASTEXITCODE -ne 0) {
     throw "Remote .env update failed."
+}
+
+if ($Redeploy) {
+    Write-Host "Running remote redeploy (npm install/build + PM2 restart)..." -ForegroundColor Cyan
+    $redeployRemote = @(
+        'set -e'
+        ("cd '{0}'" -f $AppDir)
+        'if [ -f package-lock.json ]; then'
+        '  npm ci'
+        'else'
+        '  npm install'
+        'fi'
+        'npm run build'
+        'sudo -u ubuntu pm2 restart livetrading --update-env'
+        'sudo -u ubuntu pm2 save'
+    ) -join "`n"
+    $redeployRemote = $redeployRemote -replace "`r",""
+    $b64Deploy = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($redeployRemote))
+    $runDeploy = "echo $b64Deploy | base64 -d | bash"
+    & ssh -i $KeyPath -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${User}@${PublicIp}" $runDeploy
+    if ($LASTEXITCODE -ne 0) {
+        throw "Remote redeploy failed."
+    }
 }
 
 Write-Host ""
