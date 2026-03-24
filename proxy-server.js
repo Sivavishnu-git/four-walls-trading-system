@@ -19,8 +19,18 @@ dotenv.config({ path: path.join(rootDir, ".env") });
 dotenv.config({ path: path.join(rootDir, ".env.local"), override: true });
 
 const app = express();
+// Avoid 304 + empty body on /api when JSON is unchanged (breaks fetch().json()).
+app.set("etag", false);
 app.use(cors());
 app.use(express.json());
+
+app.use((req, res, next) => {
+  if (req.originalUrl.startsWith("/api")) {
+    res.set("Cache-Control", "no-store, no-cache, must-revalidate, private");
+    res.set("Pragma", "no-cache");
+  }
+  next();
+});
 
 // --- MASTER LIST CACHE (using complete.json.gz) ---
 const COMPLETE_CACHE = { data: null, lastFetched: null };

@@ -166,6 +166,7 @@ export const TradeSetup = ({ token }) => {
     setError(null);
     try {
       const res = await fetch(`${API_BASE}/api/trade-setup`, {
+        cache: "no-store",
         headers: { Authorization: `Bearer ${token}` },
       });
       const json = await res.json();
