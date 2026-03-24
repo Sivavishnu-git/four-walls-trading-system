@@ -153,6 +153,7 @@ test_*.js
 # Batch/shell scripts (OS-specific helpers)
 *.bat
 *.sh
+!deploy/refresh-quick-tunnel.sh
 !gradlew
 
 # Deployment configs (not currently used)

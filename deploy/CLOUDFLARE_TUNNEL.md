@@ -54,6 +54,67 @@ Find the `https://….trycloudflare.com` line in the log, then `Ctrl+C` to stop 
 
 ---
 
+## Recovery: `https://hammer-….trycloudflare.com` no longer loads
+
+Quick tunnel URLs **stop working** when:
+
+- `cloudflared` exited or the server rebooted, or  
+- you started a **new** tunnel (new random hostname).
+
+**You cannot “revive” an old hostname.** You must use the **current** URL from a running `cloudflared`.
+
+### Option A — From your Windows PC (one command)
+
+If the app runs on EC2 and you have the SSH key:
+
+```powershell
+cd C:\path\to\LiveTrading
+.\deploy\Refresh-QuickTunnel.ps1 -PublicIp "YOUR_EC2_IP" -KeyPath "D:\path\to\your.pem"
+```
+
+This SSHs in, restarts `cloudflared`, updates `/home/ubuntu/app/.env` (`UPSTOX_REDIRECT_URI`, `FRONTEND_URI`), and runs `pm2 restart livetrading --update-env`.  
+Then set the **Upstox** redirect URL to the printed `…/api/auth/callback` (the script reminds you).
+
+Use `-SkipEnvUpdate` if you only want a new tunnel URL and will edit `.env` yourself.
+
+### Option B — On the server (Linux)
+
+Copy `deploy/refresh-quick-tunnel.sh` to the server, then:
+
+```bash
+chmod +x ~/refresh-quick-tunnel.sh
+~/refresh-quick-tunnel.sh
+```
+
+It stops any old quick tunnel, starts a new one pointing at Nginx (`http://127.0.0.1:80` by default), and prints:
+
+- `UPSTOX_REDIRECT_URI=…/api/auth/callback`
+- `FRONTEND_URI=…`
+
+Edit `/home/ubuntu/app/.env`, set those two lines, then:
+
+```bash
+pm2 restart livetrading --update-env
+```
+
+In the **Upstox** developer app, set the redirect URL to the **same** callback URL the script printed.
+
+### Option C — Manual
+
+```bash
+pkill -f 'cloudflared tunnel --url' || true
+nohup cloudflared tunnel --protocol http2 --url http://127.0.0.1:80 > ~/cloudflared.log 2>&1 &
+tail -f ~/cloudflared.log
+```
+
+Copy the new `https://….trycloudflare.com` line, then update **Upstox**, **`.env`** (`UPSTOX_REDIRECT_URI`, `FRONTEND_URI`), and run **`pm2 restart livetrading --update-env`** — same steps as in the **Quick tunnel** section at the top of this file.
+
+### Stop this from happening every week
+
+Quick tunnels are **not** stable. For a URL that does not change when `cloudflared` restarts, use a **named tunnel + DNS** (section below) or serve HTTPS on a real domain.
+
+---
+
 ## Named tunnel (stable hostname — free Cloudflare account)
 
 1. Install `cloudflared` (same as above).
