@@ -238,7 +238,13 @@ function App() {
           <TabErrorBoundary><OIMonitor token={accessToken} instrumentKey={instrumentKey} /></TabErrorBoundary>
         </div>
         <div style={{ display: page === "historical" ? "block" : "none", minHeight: "calc(100vh - 52px)", overflow: "auto" }}>
-          <TabErrorBoundary><HistoricalData token={accessToken} instrumentKey={instrumentKey} /></TabErrorBoundary>
+          <TabErrorBoundary>
+            <HistoricalData
+              token={accessToken}
+              instrumentKey={instrumentKey}
+              instrumentSymbol={instrumentSymbol}
+            />
+          </TabErrorBoundary>
         </div>
         <div style={{ display: page === "optionchain" ? "block" : "none", minHeight: "calc(100vh - 52px)", overflow: "auto" }}>
           <TabErrorBoundary><OptionChain token={accessToken} /></TabErrorBoundary>

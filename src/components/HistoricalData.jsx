@@ -1,49 +1,9 @@
-import { useState, useEffect, useRef } from "react";
+import { useState } from "react";
 import { API_BASE } from "../config";
 import { RefreshCw, Download, Search } from "lucide-react";
 
-export const HistoricalData = ({ token, instrumentKey: propInstrumentKey }) => {
-    const [instrumentKey, setInstrumentKey] = useState(
-        propInstrumentKey || import.meta.env.VITE_INSTRUMENT_KEY || ""
-    );
-    const [searchQuery, setSearchQuery] = useState("");
-    const [searchResults, setSearchResults] = useState([]);
-    const [showSearch, setShowSearch] = useState(false);
-    const searchTimeout = useRef(null);
-
-    useEffect(() => {
-        if (propInstrumentKey) setInstrumentKey(propInstrumentKey);
-    }, [propInstrumentKey]);
-
-    /** If parent has not supplied a key yet, load current NIFTY future from discover (same as App). */
-    useEffect(() => {
-        if (propInstrumentKey) return;
-        let cancelled = false;
-        fetch(`${API_BASE}/api/tools/discover-nifty-future`)
-            .then((r) => r.json())
-            .then((json) => {
-                if (cancelled) return;
-                if (json.status === "success" && json.data?.instrument_key) {
-                    setInstrumentKey(json.data.instrument_key);
-                }
-            })
-            .catch(() => {});
-        return () => {
-            cancelled = true;
-        };
-    }, [propInstrumentKey]);
-
-    useEffect(() => {
-        if (searchQuery.length < 2) { setSearchResults([]); return; }
-        clearTimeout(searchTimeout.current);
-        searchTimeout.current = setTimeout(async () => {
-            try {
-                const res = await fetch(`${API_BASE}/api/tools/search-master?query=${encodeURIComponent(searchQuery)}`);
-                const json = await res.json();
-                if (json.status === "success") setSearchResults(json.data || []);
-            } catch { /* ignore */ }
-        }, 300);
-    }, [searchQuery]);
+export const HistoricalData = ({ token, instrumentKey, instrumentSymbol }) => {
+    const key = String(instrumentKey || "").trim();
 
     const [interval, setInterval_] = useState("day");
     const [fromDate, setFromDate] = useState(() => {
@@ -61,14 +21,14 @@ export const HistoricalData = ({ token, instrumentKey: propInstrumentKey }) => {
             setError("No access token. Please log in first.");
             return;
         }
-        if (!instrumentKey || !String(instrumentKey).trim()) {
-            setError("Instrument key is missing. Wait for NIFTY future to load, or search and pick a symbol.");
+        if (!key) {
+            setError("No instrument key yet. Wait for the header to load the NIFTY future, then try again.");
             return;
         }
         setLoading(true);
         setError(null);
         try {
-            const url = `${API_BASE}/api/historical?instrument_key=${encodeURIComponent(instrumentKey.trim())}&interval=${interval}&to_date=${toDate}&from_date=${fromDate}`;
+            const url = `${API_BASE}/api/historical?instrument_key=${encodeURIComponent(key)}&interval=${interval}&to_date=${toDate}&from_date=${fromDate}`;
             const res = await fetch(url, {
                 headers: { Authorization: `Bearer ${token}` },
             });
@@ -81,7 +41,7 @@ export const HistoricalData = ({ token, instrumentKey: propInstrumentKey }) => {
                     res.ok
                         ? "Unexpected response from server."
                         : text.includes("<html")
-                          ? "Request failed (often empty instrument key or bad URL). Check instrument key and try again."
+                          ? "Request failed (often bad URL or server error). Try again."
                           : text.slice(0, 200),
                 );
                 setCandles([]);
@@ -89,7 +49,6 @@ export const HistoricalData = ({ token, instrumentKey: propInstrumentKey }) => {
             }
 
             if (json.status === "success" && json.data?.candles) {
-                // Sort ascending by time
                 const sorted = [...json.data.candles].sort(
                     (a, b) => new Date(a[0]) - new Date(b[0])
                 );
@@ -131,7 +90,7 @@ export const HistoricalData = ({ token, instrumentKey: propInstrumentKey }) => {
     };
 
     const downloadCSV = () => {
-        if (candles.length === 0) return;
+        if (candles.length === 0 || !key) return;
         const header = "Timestamp,Open,High,Low,Close,Volume,OI\n";
         const rows = candles
             .map((c) => `${c[0]},${c[1]},${c[2]},${c[3]},${c[4]},${c[5]},${c[6] ?? ""}`)
@@ -140,7 +99,7 @@ export const HistoricalData = ({ token, instrumentKey: propInstrumentKey }) => {
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `historical_${instrumentKey.replace("|", "_")}_${interval}_${fromDate}_${toDate}.csv`;
+        a.download = `historical_${key.replace("|", "_")}_${interval}_${fromDate}_${toDate}.csv`;
         a.click();
         URL.revokeObjectURL(url);
     };
@@ -156,41 +115,39 @@ export const HistoricalData = ({ token, instrumentKey: propInstrumentKey }) => {
                 </div>
 
                 <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
-                    <div style={{ position: "relative" }}>
-                        <input
-                            type="text"
-                            value={showSearch ? searchQuery : instrumentKey}
-                            onChange={(e) => {
-                                if (showSearch) setSearchQuery(e.target.value);
-                                else setInstrumentKey(e.target.value);
-                            }}
-                            onFocus={() => setShowSearch(true)}
-                            onBlur={() => setTimeout(() => setShowSearch(false), 200)}
-                            placeholder={showSearch ? "Search (e.g. NIFTY, RELIANCE)..." : "Instrument Key"}
-                            className="token-input"
-                            style={{ minWidth: "220px" }}
-                        />
-                        {showSearch && searchResults.length > 0 && (
-                            <div style={{
-                                position: "absolute", top: "100%", left: 0, right: 0,
-                                background: "#1e222d", border: "1px solid rgba(255,255,255,0.15)",
-                                borderRadius: "0 0 8px 8px", maxHeight: "250px", overflowY: "auto", zIndex: 100,
-                            }}>
-                                {searchResults.map((r, i) => (
-                                    <div key={i}
-                                        onMouseDown={() => { setInstrumentKey(r.key); setSearchQuery(""); setSearchResults([]); setShowSearch(false); }}
-                                        style={{ padding: "8px 12px", cursor: "pointer", borderBottom: "1px solid rgba(255,255,255,0.05)", fontSize: "0.85rem" }}
-                                        onMouseEnter={(e) => e.currentTarget.style.background = "rgba(255,255,255,0.08)"}
-                                        onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
-                                    >
-                                        <div style={{ color: "#fff", fontWeight: 600 }}>{r.symbol}</div>
-                                        <div style={{ color: "#666", fontSize: "0.75rem" }}>
-                                            {r.key} {r.expiry ? `• ${new Date(r.expiry).toLocaleDateString()}` : ""} {r.type || ""}
-                                        </div>
-                                    </div>
-                                ))}
+                    <div
+                        className="token-input"
+                        style={{
+                            minWidth: "240px",
+                            maxWidth: "min(420px, 100%)",
+                            padding: "10px 14px",
+                            background: "rgba(0,0,0,0.35)",
+                            border: "1px solid rgba(255,255,255,0.15)",
+                            borderRadius: "8px",
+                            cursor: "default",
+                            userSelect: "text",
+                        }}
+                        title="Instrument is fixed from the OI Monitor session (read-only)"
+                    >
+                        <div style={{ fontSize: "0.7rem", color: "#888", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: "4px" }}>
+                            Instrument
+                        </div>
+                        {instrumentSymbol ? (
+                            <div style={{ color: "#26a69a", fontWeight: 600, fontSize: "0.95rem", marginBottom: "6px" }}>
+                                {instrumentSymbol}
                             </div>
-                        )}
+                        ) : null}
+                        <div
+                            style={{
+                                fontFamily: "ui-monospace, monospace",
+                                fontSize: "0.8rem",
+                                color: key ? "#cfd8e3" : "#666",
+                                wordBreak: "break-all",
+                                lineHeight: 1.35,
+                            }}
+                        >
+                            {key || "—"}
+                        </div>
                     </div>
 
                     <select
@@ -241,7 +198,12 @@ export const HistoricalData = ({ token, instrumentKey: propInstrumentKey }) => {
                         }}
                     />
 
-                    <button onClick={fetchData} className="connect-btn" disabled={loading}>
+                    <button
+                        onClick={fetchData}
+                        className="connect-btn"
+                        disabled={loading || !key}
+                        title={!key ? "Wait for instrument to load in the header" : undefined}
+                    >
                         {loading ? <RefreshCw size={16} className="spinning" /> : <Search size={16} />}
                         <span style={{ marginLeft: "6px" }}>{loading ? "Fetching..." : "Fetch"}</span>
                     </button>
@@ -333,7 +295,7 @@ export const HistoricalData = ({ token, instrumentKey: propInstrumentKey }) => {
                     <h2>Candle Data</h2>
                     {candles.length > 0 && (
                         <span style={{ color: "#888", fontSize: "0.85rem" }}>
-                            {candles.length} rows • {instrumentKey}
+                            {candles.length} rows • {key}
                         </span>
                     )}
                 </div>
@@ -341,7 +303,11 @@ export const HistoricalData = ({ token, instrumentKey: propInstrumentKey }) => {
                     {candles.length === 0 ? (
                         <div className="empty-state">
                             <Search size={48} />
-                            <p>Select parameters and click Fetch to load historical data.</p>
+                            <p>
+                                {key
+                                    ? "Select date range and interval, then click Fetch."
+                                    : "Wait for the instrument to load in the header, then click Fetch."}
+                            </p>
                         </div>
                     ) : (
                         <table className="oi-table">
@@ -363,7 +329,7 @@ export const HistoricalData = ({ token, instrumentKey: propInstrumentKey }) => {
                                     const oiChange = idx > 0 && c[6] != null && candles[idx - 1][6] != null
                                         ? c[6] - candles[idx - 1][6]
                                         : null;
-                                    const priceChange = c[4] - c[1]; // close - open
+                                    const priceChange = c[4] - c[1];
                                     return (
                                         <tr key={idx} className={idx === candles.length - 1 ? "latest-row" : ""}>
                                             <td style={{ color: "#555", fontSize: "0.8rem" }}>{idx + 1}</td>

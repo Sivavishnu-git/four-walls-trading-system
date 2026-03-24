@@ -40,7 +40,21 @@ export const OptionChain = ({ token }) => {
         `${API_BASE}/api/option-chain?expiry_type=${expiryType}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      const json = await res.json();
+      const text = await res.text();
+      let json;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        const html = text.trimStart().startsWith("<");
+        setError(
+          html
+            ? `Got HTML instead of JSON (${res.status}). Start the API proxy (port 3000) and ensure /api is proxied, or set VITE_API_BASE=http://localhost:3000 when using vite preview.`
+            : `Invalid JSON response (${res.status}): ${text.slice(0, 120)}`
+        );
+        setChain([]);
+        setSpotPrice(0);
+        return;
+      }
       if (json.status === "success" && json.data) {
         setPrevChain(chain);
         setChain(json.data.chain || []);
