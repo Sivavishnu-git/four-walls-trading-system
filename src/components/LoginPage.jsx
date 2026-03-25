@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { KeyRound, LogIn, Shield, TrendingUp } from "lucide-react";
 import { useAuth } from "../context/AuthContext.jsx";
-import { MIN_ACCESS_TOKEN_LEN, normalizeAccessToken } from "../utils/authToken";
+import { isValidAccessToken, normalizeAccessToken } from "../utils/authToken";
 
 /**
  * Shown when no Upstox access token is present. OAuth or paste token (stored via AuthContext).
@@ -25,7 +25,10 @@ export function LoginPage() {
 
   return (
     <div
+      className="login-page-root"
       style={{
+        flex: 1,
+        alignSelf: "stretch",
         minHeight: "100vh",
         width: "100%",
         display: "flex",

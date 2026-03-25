@@ -13,6 +13,15 @@ export function bearerAuthHeaders(raw) {
 
 export const MIN_ACCESS_TOKEN_LEN = 20;
 
+/** Values from docs/templates that must not count as a real session token. */
+const PLACEHOLDER_TOKENS = new Set([
+  "your_access_token_here",
+  "your_access_token",
+]);
+
 export function isValidAccessToken(raw) {
-  return normalizeAccessToken(raw).length >= MIN_ACCESS_TOKEN_LEN;
+  const t = normalizeAccessToken(raw);
+  if (t.length < MIN_ACCESS_TOKEN_LEN) return false;
+  if (PLACEHOLDER_TOKENS.has(t.toLowerCase())) return false;
+  return true;
 }

@@ -6,7 +6,7 @@ import {
   useState,
 } from "react";
 import { AUTH_LOGIN_URL } from "../config";
-import { normalizeAccessToken, MIN_ACCESS_TOKEN_LEN } from "../utils/authToken";
+import { normalizeAccessToken, isValidAccessToken } from "../utils/authToken";
 
 const STORAGE_KEY = "upstox_access_token";
 
@@ -15,13 +15,22 @@ function readInitialAccessToken() {
   const urlToken = params.get("token");
   if (urlToken) {
     const t = normalizeAccessToken(urlToken);
-    localStorage.setItem(STORAGE_KEY, t);
     window.history.replaceState({}, "", window.location.pathname);
-    return t;
+    if (isValidAccessToken(t)) {
+      localStorage.setItem(STORAGE_KEY, t);
+      return t;
+    }
+    return "";
   }
   const fromLs = localStorage.getItem(STORAGE_KEY) || "";
-  const fromEnv = import.meta.env.VITE_UPSTOX_ACCESS_TOKEN || "";
-  return normalizeAccessToken(fromLs || fromEnv);
+  /** In production, never seed session from Vite env (avoids skipping login when token is baked into the bundle). */
+  const fromEnv = import.meta.env.DEV ? (import.meta.env.VITE_UPSTOX_ACCESS_TOKEN || "") : "";
+  const candidate = normalizeAccessToken(fromLs || fromEnv);
+  if (!isValidAccessToken(candidate)) {
+    if (fromLs) localStorage.removeItem(STORAGE_KEY);
+    return "";
+  }
+  return candidate;
 }
 
 const AuthContext = createContext(null);
@@ -31,7 +40,7 @@ export function AuthProvider({ children }) {
 
   const saveAccessToken = useCallback((raw) => {
     const t = typeof raw === "string" ? normalizeAccessToken(raw) : "";
-    if (t.length < MIN_ACCESS_TOKEN_LEN) return;
+    if (!isValidAccessToken(t)) return;
     localStorage.setItem(STORAGE_KEY, t);
     setAccessTokenState(t);
   }, []);
