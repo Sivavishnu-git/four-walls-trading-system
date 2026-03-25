@@ -43,8 +43,6 @@ export const OrderPanel = () => {
 
   const timerRef = useRef(null);
 
-  const authHeaders = { Authorization: `Bearer ${token}` };
-
   const fetchATM = useCallback(async () => {
     if (!token) { setError("No access token. Please login first."); return; }
     setLoading(true);
@@ -71,7 +69,7 @@ export const OrderPanel = () => {
       if (json.data) setPositions(Array.isArray(json.data) ? json.data : []);
     } catch {}
     finally { setPosLoading(false); }
-  }, [token]);
+  }, [token, authHeaders]);
 
   const fetchOrders = useCallback(async () => {
     if (!token) return;
