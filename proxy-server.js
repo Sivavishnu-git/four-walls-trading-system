@@ -1011,20 +1011,20 @@ function istMinuteOfDay(isoTs) {
 }
 
 /**
- * Single synthetic 15-minute OHLC per session day (IST), built from fifteen 1m bars.
- * Window: 1m opens 9:16 … 9:30 IST (15 minutes of clock time; last 1m completes ~9:31).
- * Upstox has no native 15m interval — this matches a 15m candle “forming” right after 9:30.
- * - O = open of 9:16 bar
- * - H / L = max high / min low across those 15 bars
- * - C = close of 9:30 bar
+ * Single synthetic 15-minute OHLC per session day (IST), built from fifteen 1m bars (Upstox feed).
+ * Window: NSE cash-style first 15 minutes — 1m candle **open** times 9:15 … 9:29 IST (inclusive).
+ * (15 bars × 1 minute = 15 minutes from 9:15 to end of 9:29 bar / start of 9:30.)
+ * - O = open of 9:15 bar
+ * - H / L = max high / min low across those bars
+ * - C = close of 9:29 bar
  * - volume = sum of volumes
  * Picks the latest IST session date present in the feed (each trading day).
  */
 function buildOpening15mOhlc(sortedOneMinCandles) {
   if (!sortedOneMinCandles?.length) return null;
-  const start = 9 * 60 + 16;
-  const end = 9 * 60 + 30;
-  /** IST date -> candles whose open time falls in 9:16–9:30 IST */
+  const start = 9 * 60 + 15;
+  const end = 9 * 60 + 29;
+  /** IST date -> candles whose open time falls in 9:15–9:29 IST */
   const byDate = {};
   for (const c of sortedOneMinCandles) {
     const mod = istMinuteOfDay(c[0]);
@@ -1053,9 +1053,9 @@ function buildOpening15mOhlc(sortedOneMinCandles) {
     oi_last: oiLast != null && !Number.isNaN(Number(oiLast)) ? Number(oiLast) : null,
     bar_count: range.length,
     session_date: lastDate,
-    /** When the 15m bar is fully known (after 9:30 1m closes) */
-    formation_time_ist: "09:31",
-    window_ist: "09:16–09:30",
+    /** Last 1m bar in window opens 9:29 IST */
+    formation_time_ist: "09:30",
+    window_ist: "09:15–09:29",
   };
 }
 
@@ -1090,6 +1090,62 @@ function buildFuturePayload(currentFuture) {
     display_name: displayName,
   };
 }
+
+async function resolveCurrentNiftyFutureInstrument() {
+  const instruments = await getMasterData("NFO");
+  if (!instruments) return null;
+  const niftyFutures = instruments.filter((i) => i.name === "NIFTY" && i.instrument_type === "FUT");
+  niftyFutures.sort((a, b) => a.expiry - b.expiry);
+  return niftyFutures[0] || null;
+}
+
+/** Fast live LTP for chart — polls Upstox quotes only (no heavy historical). */
+app.get("/api/chart-quote", async (req, res) => {
+  try {
+    const accessToken = req.headers.authorization;
+    if (!accessToken) return res.status(400).json({ error: "Missing Authorization Header" });
+
+    const currentFuture = await resolveCurrentNiftyFutureInstrument();
+    if (!currentFuture) return res.status(404).json({ error: "No Nifty Future found" });
+
+    const futKey = currentFuture.instrument_key;
+    const quoteRes = await axios.get(
+      `https://api.upstox.com/v2/market-quote/quotes?instrument_key=${encodeURIComponent(futKey)}`,
+      { headers: { Authorization: accessToken, Accept: "application/json" } },
+    ).catch((e) => ({ data: null, error: e.response?.data || e.message }));
+
+    if (!quoteRes.data?.data) {
+      return res.status(502).json({ status: "error", error: "Quote unavailable" });
+    }
+    const q = Object.values(quoteRes.data.data).find((x) => x.instrument_token === futKey);
+    if (!q) return res.status(502).json({ status: "error", error: "No quote for instrument" });
+
+    const liveQuote = {
+      ltp: q.last_price,
+      oi: q.oi,
+      volume: q.volume,
+      open: q.ohlc?.open,
+      high: q.ohlc?.high,
+      low: q.ohlc?.low,
+      close: q.ohlc?.close,
+      change: q.net_change,
+      change_pct: q.percentage_change,
+    };
+
+    res.set("Cache-Control", "no-store, no-cache, must-revalidate, private");
+    res.json({
+      status: "success",
+      data: {
+        instrument_key: futKey,
+        future: buildFuturePayload(currentFuture),
+        live: liveQuote,
+      },
+    });
+  } catch (error) {
+    console.error("Chart quote error:", error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // Trade Setup Endpoint — Fetches pivot data, intraday candles, live quote + ATM OI
 app.get("/api/trade-setup", async (req, res) => {
@@ -1147,7 +1203,7 @@ app.get("/api/trade-setup", async (req, res) => {
       }
     }
 
-    // Intraday 1-min candles → aggregate to 5-min + opening 15m OHLC (9:15–9:30 IST)
+    // Intraday 1-min candles → aggregate to 5-min + opening 15m OHLC (9:15–9:29 IST, 15×1m)
     let fiveMinCandles = [];
     let opening15mOhlc = null;
     if (intradayRes.data?.data?.candles) {

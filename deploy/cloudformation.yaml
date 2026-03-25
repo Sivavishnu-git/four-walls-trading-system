@@ -292,6 +292,16 @@ Mappings:
       AMI: ami-0faab6bdbac9486fb
 
 Outputs:
+  AppSecurityGroupId:
+    Description: EC2 app security group — allow HTTP from ALB stack (deploy-alb-https.ps1)
+    Value: !GetAtt AppSecurityGroup.GroupId
+    Export:
+      Name: !Sub "${AWS::StackName}-AppSecurityGroupId"
+
+  EC2InstanceId:
+    Description: EC2 instance ID (for ALB target registration)
+    Value: !Ref EC2Instance
+
   PublicIP:
     Description: Elastic IP address of the server
     Value: !Ref ElasticIP

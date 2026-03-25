@@ -3,6 +3,8 @@ import { createChart, ColorType, LineStyle, CandlestickSeries, HistogramSeries }
 import { RefreshCw, Calculator } from "lucide-react";
 import { API_BASE } from "../config";
 import { computeIntradayPivots } from "../utils/intradayPivots";
+import { useAuth } from "../context/AuthContext.jsx";
+import { bearerAuthHeaders } from "../utils/authToken";
 
 const PIVOT_COLORS = {
   pp: { color: "#ff9800", label: "Pivot" },
@@ -14,7 +16,8 @@ const PIVOT_COLORS = {
   s3: { color: "#00897b", label: "S3" },
 };
 
-export const TradingViewChart = ({ token }) => {
+export const TradingViewChart = () => {
+  const { accessToken: token } = useAuth();
   const chartContainerRef = useRef(null);
   const chartRef = useRef(null);
   const candleSeriesRef = useRef(null);
@@ -39,6 +42,8 @@ export const TradingViewChart = ({ token }) => {
 
   /** Avoid re-applying opening OHLC on every 15s poll; reset when session_date changes (new day). */
   const lastOpeningSessionRef = useRef(null);
+  /** Latest pivots for draw after setData (React state is stale inside fetchData). */
+  const pivotDataRef = useRef(null);
 
   const initChart = useCallback(() => {
     if (!chartContainerRef.current || chartRef.current) return;
@@ -94,6 +99,11 @@ export const TradingViewChart = ({ token }) => {
     candleSeriesRef.current = candleSeries;
     volumeSeriesRef.current = volumeSeries;
 
+    const el = chartContainerRef.current;
+    const w = el.clientWidth || 800;
+    const h = Math.max(320, el.clientHeight || 480);
+    chart.applyOptions({ width: w, height: h });
+
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const { width, height } = entry.contentRect;
@@ -143,6 +153,11 @@ export const TradingViewChart = ({ token }) => {
     }
   }, [showPivots]);
 
+  const drawPivotLinesRef = useRef(drawPivotLines);
+  useEffect(() => {
+    drawPivotLinesRef.current = drawPivotLines;
+  }, [drawPivotLines]);
+
   /** Intraday pivots from O/H/L/C — redraw PP, R1–R3, S1–S3 on the chart. */
   const applyPivots = useCallback(() => {
     if (!inputOpen || !inputHigh || !inputLow || !inputClose) return;
@@ -167,6 +182,10 @@ export const TradingViewChart = ({ token }) => {
     }
   }, []);
 
+  useEffect(() => {
+    pivotDataRef.current = pivotData;
+  }, [pivotData]);
+
   const fetchData = useCallback(async () => {
     if (!token) {
       setChartMessage("Token missing or expired. Please click Re-Login.");
@@ -174,10 +193,12 @@ export const TradingViewChart = ({ token }) => {
     }
     setLoading(true);
 
+    let pivotsForRedraw = null;
+
     try {
       const res = await fetch(`${API_BASE}/api/trade-setup`, {
         cache: "no-store",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: bearerAuthHeaders(token),
       });
       const json = await res.json();
 
@@ -217,17 +238,18 @@ export const TradingViewChart = ({ token }) => {
         const pivots = computeIntradayPivots(oStr, hStr, lStr, cStr);
         if (pivots) {
           setPivotData(pivots);
-          drawPivotLines(pivots);
+          pivotDataRef.current = pivots;
+          pivotsForRedraw = pivots;
+          drawPivotLinesRef.current(pivots);
         }
       }
 
       if (five_min_candles && five_min_candles.length > 0 && candleSeriesRef.current) {
-        const candleData = five_min_candles.map((c) => {
+        const raw = five_min_candles.map((c) => {
           const t = Math.floor(new Date(c.time).getTime() / 1000);
           return { time: t, open: c.open, high: c.high, low: c.low, close: c.close };
         });
-
-        const volumeData = five_min_candles.map((c) => {
+        const rawVol = five_min_candles.map((c) => {
           const t = Math.floor(new Date(c.time).getTime() / 1000);
           return {
             time: t,
@@ -236,10 +258,35 @@ export const TradingViewChart = ({ token }) => {
           };
         });
 
-        candleSeriesRef.current.setData(candleData);
-        volumeSeriesRef.current.setData(volumeData);
+        const byTime = new Map();
+        for (const bar of raw) {
+          if (!Number.isFinite(bar.time)) continue;
+          byTime.set(bar.time, bar);
+        }
+        const candleData = [...byTime.values()].sort((a, b) => a.time - b.time);
 
-        drawPivotLines(pivotData);
+        const volByTime = new Map();
+        for (const v of rawVol) {
+          if (!Number.isFinite(v.time)) continue;
+          volByTime.set(v.time, v);
+        }
+        const volumeData = candleData.map((c) => volByTime.get(c.time) ?? {
+          time: c.time,
+          value: 0,
+          color: "rgba(38,166,154,0.2)",
+        });
+
+        try {
+          candleSeriesRef.current.setData(candleData);
+          volumeSeriesRef.current.setData(volumeData);
+        } catch (e) {
+          console.error("lightweight-charts setData:", e);
+          setChartMessage("Could not render candles (invalid time series). Try refresh.");
+          return;
+        }
+
+        const pivotsToDraw = pivotsForRedraw ?? pivotDataRef.current;
+        if (pivotsToDraw) drawPivotLinesRef.current(pivotsToDraw);
         setLastUpdate(new Date());
 
         if (candleData.length > 0) {
@@ -247,7 +294,9 @@ export const TradingViewChart = ({ token }) => {
         }
         setChartMessage("");
       } else {
-        setChartMessage("No 5-min candle data available for current mode/date.");
+        setChartMessage(
+          "No 5‑min candles for today (IST) yet — pre‑market, holiday, or upstream has no intraday data. Opening OHLC may still be from the last session.",
+        );
       }
     } catch (err) {
       console.error("Chart data error:", err.message);
@@ -255,9 +304,11 @@ export const TradingViewChart = ({ token }) => {
     } finally {
       setLoading(false);
     }
-  }, [token, drawPivotLines, pivotData]);
+  }, [token]);
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
   useEffect(() => {
     drawPivotLines(pivotData);
@@ -400,8 +451,8 @@ export const TradingViewChart = ({ token }) => {
       )}
 
       {/* Chart */}
-      <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
-        <div ref={chartContainerRef} style={{ height: "100%" }} />
+      <div style={{ flex: 1, minHeight: "clamp(260px, 42vh, 900px)", position: "relative" }}>
+        <div ref={chartContainerRef} style={{ height: "100%", width: "100%", minHeight: "inherit" }} />
         {chartMessage && !loading && (
           <div
             style={{

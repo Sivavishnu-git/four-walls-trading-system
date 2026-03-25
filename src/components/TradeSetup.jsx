@@ -4,6 +4,8 @@ import {
   RefreshCw, TrendingUp, TrendingDown, Activity, Target,
   ArrowUpCircle, ArrowDownCircle, Crosshair, Zap, Shield,
 } from "lucide-react";
+import { useAuth } from "../context/AuthContext.jsx";
+import { bearerAuthHeaders } from "../utils/authToken";
 
 const STEP = 50;
 
@@ -152,7 +154,8 @@ const generateTradeSignal = (trend, phase, position, atmOI, ltp, pivots) => {
   return signals;
 };
 
-export const TradeSetup = ({ token }) => {
+export const TradeSetup = () => {
+  const { accessToken: token } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -167,7 +170,7 @@ export const TradeSetup = ({ token }) => {
     try {
       const res = await fetch(`${API_BASE}/api/trade-setup`, {
         cache: "no-store",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: bearerAuthHeaders(token),
       });
       const json = await res.json();
       if (json.status === "success") {

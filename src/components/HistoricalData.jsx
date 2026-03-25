@@ -1,8 +1,11 @@
 import { useState } from "react";
 import { API_BASE } from "../config";
 import { RefreshCw, Download, Search } from "lucide-react";
+import { useAuth } from "../context/AuthContext.jsx";
+import { bearerAuthHeaders } from "../utils/authToken";
 
-export const HistoricalData = ({ token, instrumentKey, instrumentSymbol }) => {
+export const HistoricalData = ({ instrumentKey, instrumentSymbol }) => {
+    const { accessToken: token } = useAuth();
     const key = String(instrumentKey || "").trim();
 
     const [interval, setInterval_] = useState("day");
@@ -30,7 +33,7 @@ export const HistoricalData = ({ token, instrumentKey, instrumentSymbol }) => {
         try {
             const url = `${API_BASE}/api/historical?instrument_key=${encodeURIComponent(key)}&interval=${interval}&to_date=${toDate}&from_date=${fromDate}`;
             const res = await fetch(url, {
-                headers: { Authorization: `Bearer ${token}` },
+                headers: bearerAuthHeaders(token),
             });
             const text = await res.text();
             let json;

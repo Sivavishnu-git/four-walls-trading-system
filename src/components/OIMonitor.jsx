@@ -1,4 +1,6 @@
 import { useEffect, useState, useRef } from "react";
+import { useAuth } from "../context/AuthContext.jsx";
+import { bearerAuthHeaders } from "../utils/authToken";
 import {
     TrendingUp,
     TrendingDown,
@@ -10,12 +12,8 @@ import { API_BASE } from "../config";
 // import { MarketTrendAnalysis } from './MarketTrendAnalysis';
 // import { OptionEntryPlanner } from './OptionEntryPlanner';
 
-export const OIMonitor = ({ token: propToken, instrumentKey: propInstrumentKey }) => {
-    const token =
-        propToken ||
-        localStorage.getItem("upstox_access_token") ||
-        import.meta.env.VITE_UPSTOX_ACCESS_TOKEN ||
-        "";
+export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
+    const { accessToken: token } = useAuth();
     const [isLive, setIsLive] = useState(false);
     const [oiHistory, setOiHistory] = useState([]);
     const [currentOI, setCurrentOI] = useState(null);
@@ -182,7 +180,7 @@ export const OIMonitor = ({ token: propToken, instrumentKey: propInstrumentKey }
                 const response = await fetch(
                     `${API_BASE}/api/historical?instrument_key=${encodeURIComponent(instrumentKey)}&interval=day&to_date=${today}&from_date=${fiveDaysAgo}`,
                     {
-                        headers: { Authorization: `Bearer ${token}` },
+                        headers: bearerAuthHeaders(token),
                     },
                 );
 
@@ -267,8 +265,6 @@ export const OIMonitor = ({ token: propToken, instrumentKey: propInstrumentKey }
             return;
         }
 
-        // Persist values so they aren't lost on refresh
-        localStorage.setItem("upstox_access_token", token);
         localStorage.setItem("oi_initial_offset", initialOIChange.toString());
 
         console.log("Connecting with instrument:", instrumentKey);

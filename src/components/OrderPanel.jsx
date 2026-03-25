@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   RefreshCw, ShoppingCart, X, AlertTriangle, CheckCircle,
   TrendingUp, TrendingDown, ArrowUpCircle, ArrowDownCircle,
@@ -6,11 +6,15 @@ import {
 } from "lucide-react";
 
 import { API_BASE } from "../config";
+import { useAuth } from "../context/AuthContext.jsx";
+import { bearerAuthHeaders } from "../utils/authToken";
 
 const DEFAULT_LOT_SIZE = 65;
 const BASE_URL = API_BASE;
 
-export const OrderPanel = ({ token }) => {
+export const OrderPanel = () => {
+  const { accessToken: token } = useAuth();
+  const authHeaders = useMemo(() => bearerAuthHeaders(token), [token]);
   const [atmData, setAtmData] = useState(null);
   const [positions, setPositions] = useState([]);
   const [orders, setOrders] = useState([]);
@@ -39,14 +43,14 @@ export const OrderPanel = ({ token }) => {
 
   const timerRef = useRef(null);
 
-  const authHeader = { Authorization: `Bearer ${token}` };
+  const authHeaders = { Authorization: `Bearer ${token}` };
 
   const fetchATM = useCallback(async () => {
     if (!token) { setError("No access token. Please login first."); return; }
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${BASE_URL}/api/atm-options`, { headers: authHeader });
+      const res = await fetch(`${BASE_URL}/api/atm-options`, { headers: authHeaders });
       const json = await res.json();
       if (json.status === "success") {
         setAtmData(json.data);
@@ -56,13 +60,13 @@ export const OrderPanel = ({ token }) => {
       }
     } catch (err) { setError(err.message); }
     finally { setLoading(false); }
-  }, [token]);
+  }, [token, authHeaders]);
 
   const fetchPositions = useCallback(async () => {
     if (!token) return;
     setPosLoading(true);
     try {
-      const res = await fetch(`${BASE_URL}/api/portfolio/positions`, { headers: authHeader });
+      const res = await fetch(`${BASE_URL}/api/portfolio/positions`, { headers: authHeaders });
       const json = await res.json();
       if (json.data) setPositions(Array.isArray(json.data) ? json.data : []);
     } catch {}
@@ -73,18 +77,18 @@ export const OrderPanel = ({ token }) => {
     if (!token) return;
     setOrderLoading(true);
     try {
-      const res = await fetch(`${BASE_URL}/api/order/book`, { headers: authHeader });
+      const res = await fetch(`${BASE_URL}/api/order/book`, { headers: authHeaders });
       const json = await res.json();
       if (json.data) setOrders(Array.isArray(json.data) ? json.data : []);
     } catch {}
     finally { setOrderLoading(false); }
-  }, [token]);
+  }, [token, authHeaders]);
 
   const fetchGttOrders = useCallback(async () => {
     if (!token) return;
     setGttLoading(true);
     try {
-      const res = await fetch(`${BASE_URL}/api/order/gtt`, { headers: authHeader });
+      const res = await fetch(`${BASE_URL}/api/order/gtt`, { headers: authHeaders });
       const json = await res.json();
       if (json.status === "success" && json.data) {
         setGttOrders(Array.isArray(json.data) ? json.data : []);
@@ -96,7 +100,7 @@ export const OrderPanel = ({ token }) => {
     } finally {
       setGttLoading(false);
     }
-  }, [token]);
+  }, [token, authHeaders]);
 
   const refreshAll = useCallback(() => {
     fetchATM();
@@ -163,7 +167,7 @@ export const OrderPanel = ({ token }) => {
         };
         const res = await fetch(`${BASE_URL}/api/order/gtt/place`, {
           method: "POST",
-          headers: { ...authHeader, "Content-Type": "application/json" },
+          headers: { ...authHeaders, "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
         const json = await res.json();
@@ -198,7 +202,7 @@ export const OrderPanel = ({ token }) => {
       };
       const res = await fetch(`${BASE_URL}/api/order/place`, {
         method: "POST",
-        headers: { ...authHeader, "Content-Type": "application/json" },
+        headers: { ...authHeaders, "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
       const json = await res.json();
@@ -219,7 +223,7 @@ export const OrderPanel = ({ token }) => {
     try {
       const res = await fetch(`${BASE_URL}/api/order/cancel?order_id=${orderId}`, {
         method: "DELETE",
-        headers: authHeader,
+        headers: authHeaders,
       });
       const json = await res.json();
       if (res.ok) fetchOrders();
@@ -231,7 +235,7 @@ export const OrderPanel = ({ token }) => {
     try {
       const res = await fetch(`${BASE_URL}/api/order/gtt/cancel`, {
         method: "DELETE",
-        headers: { ...authHeader, "Content-Type": "application/json" },
+        headers: { ...authHeaders, "Content-Type": "application/json" },
         body: JSON.stringify({ gtt_order_id: gttOrderId }),
       });
       const json = await res.json();
@@ -299,7 +303,7 @@ export const OrderPanel = ({ token }) => {
       };
       const res = await fetch(`${BASE_URL}/api/order/gtt/modify`, {
         method: "PUT",
-        headers: { ...authHeader, "Content-Type": "application/json" },
+        headers: { ...authHeaders, "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
       const json = await res.json();

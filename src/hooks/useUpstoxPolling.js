@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { API_BASE } from "../config";
+import { normalizeAccessToken } from "../utils/authToken";
 
 /**
  * useUpstoxPolling Hook
@@ -21,7 +22,7 @@ export const useUpstoxPolling = (accessToken, instrumentKeys = [], interval = 20
         if (!accessToken || instrumentKeys.length === 0) return;
 
         try {
-            const cleanToken = accessToken.replace(/^Bearer\s+/i, "").trim();
+            const cleanToken = normalizeAccessToken(accessToken);
             const keysParam = instrumentKeys.join(",");
 
             const response = await fetch(`${API_BASE}/api/quotes?instrument_keys=${encodeURIComponent(keysParam)}`, {

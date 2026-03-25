@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from "react";
-import { API_BASE, AUTH_LOGIN_URL } from "./config";
+import { API_BASE } from "./config";
+import { useAuth } from "./context/AuthContext.jsx";
+import { bearerAuthHeaders, isValidAccessToken } from "./utils/authToken";
 import { Activity, BarChart3, LogIn, Target, Crosshair, ShoppingCart, TrendingUp } from "lucide-react";
 import { OIMonitor } from "./components/OIMonitor";
 import { HistoricalData } from "./components/HistoricalData";
@@ -7,6 +9,7 @@ import { OptionChain } from "./components/OptionChain";
 import { TradeSetup } from "./components/TradeSetup";
 import { OrderPanel } from "./components/OrderPanel";
 import { TradingViewChart } from "./components/TradingViewChart";
+import { LoginPage } from "./components/LoginPage";
 
 class TabErrorBoundary extends React.Component {
   state = { hasError: false, error: null };
@@ -29,20 +32,7 @@ class TabErrorBoundary extends React.Component {
 }
 
 function App() {
-  const [accessToken, setAccessToken] = useState(() => {
-    const params = new URLSearchParams(window.location.search);
-    const urlToken = params.get("token");
-    if (urlToken) {
-      localStorage.setItem("upstox_access_token", urlToken);
-      window.history.replaceState({}, "", window.location.pathname);
-      return urlToken;
-    }
-    return (
-      localStorage.getItem("upstox_access_token") ||
-      import.meta.env.VITE_UPSTOX_ACCESS_TOKEN ||
-      ""
-    );
-  });
+  const { accessToken, loginRedirect } = useAuth();
 
   const [instrumentKey, setInstrumentKey] = useState(
     import.meta.env.VITE_INSTRUMENT_KEY || ""
@@ -65,12 +55,11 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!accessToken || accessToken.length < 20 || !instrumentKey) {
+    if (!isValidAccessToken(accessToken) || !instrumentKey) {
       setNiftyFutLtp(null);
       setNiftyFutChange(null);
       return;
     }
-    const token = accessToken.replace(/^Bearer\s+/i, "").trim();
     let cancelled = false;
     const tick = async () => {
       try {
@@ -78,7 +67,7 @@ function App() {
           `${API_BASE}/api/quotes?instrument_keys=${encodeURIComponent(instrumentKey)}`,
           {
             headers: {
-              Authorization: `Bearer ${token}`,
+              ...bearerAuthHeaders(accessToken),
               Accept: "application/json",
             },
           },
@@ -105,11 +94,11 @@ function App() {
     };
   }, [accessToken, instrumentKey]);
 
-  const handleLogin = () => {
-    window.location.href = AUTH_LOGIN_URL;
-  };
+  const tokenExpired = !isValidAccessToken(accessToken);
 
-  const tokenExpired = !accessToken || accessToken.length < 20;
+  if (tokenExpired) {
+    return <LoginPage />;
+  }
 
   const tabStyle = (id, color) => ({
     padding: "14px 24px",
@@ -205,7 +194,7 @@ function App() {
             </span>
           )}
           <button
-            onClick={handleLogin}
+            onClick={loginRedirect}
             style={{
               padding: "8px 16px",
               background: tokenExpired ? "rgba(239,83,80,0.2)" : "rgba(38,166,154,0.15)",
@@ -235,30 +224,29 @@ function App() {
         }}
       >
         <div style={{ display: page === "oi" ? "block" : "none", minHeight: "calc(100vh - 52px)", overflow: "auto" }}>
-          <TabErrorBoundary><OIMonitor token={accessToken} instrumentKey={instrumentKey} /></TabErrorBoundary>
+          <TabErrorBoundary><OIMonitor instrumentKey={instrumentKey} /></TabErrorBoundary>
         </div>
         <div style={{ display: page === "historical" ? "block" : "none", minHeight: "calc(100vh - 52px)", overflow: "auto" }}>
           <TabErrorBoundary>
             <HistoricalData
-              token={accessToken}
               instrumentKey={instrumentKey}
               instrumentSymbol={instrumentSymbol}
             />
           </TabErrorBoundary>
         </div>
         <div style={{ display: page === "optionchain" ? "block" : "none", minHeight: "calc(100vh - 52px)", overflow: "auto" }}>
-          <TabErrorBoundary><OptionChain token={accessToken} /></TabErrorBoundary>
+          <TabErrorBoundary><OptionChain /></TabErrorBoundary>
         </div>
         <div style={{ display: page === "tradesetup" ? "block" : "none", minHeight: "calc(100vh - 52px)", overflow: "auto" }}>
-          <TabErrorBoundary><TradeSetup token={accessToken} /></TabErrorBoundary>
+          <TabErrorBoundary><TradeSetup /></TabErrorBoundary>
         </div>
         <div style={{ display: page === "chart" ? "block" : "none", height: "calc(100vh - 52px)", minHeight: 360, overflow: "hidden" }}>
           {page === "chart" && (
-            <TabErrorBoundary><TradingViewChart token={accessToken} /></TabErrorBoundary>
+            <TabErrorBoundary><TradingViewChart /></TabErrorBoundary>
           )}
         </div>
         <div style={{ display: page === "orders" ? "block" : "none", minHeight: "calc(100vh - 52px)", overflow: "auto" }}>
-          <TabErrorBoundary><OrderPanel token={accessToken} /></TabErrorBoundary>
+          <TabErrorBoundary><OrderPanel /></TabErrorBoundary>
         </div>
       </div>
     </div>

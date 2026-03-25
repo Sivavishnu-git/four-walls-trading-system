@@ -117,7 +117,7 @@ if (-not $KeyPath) { $KeyPath = $env:LIVETRADING_KEY_PATH }
 if (-not $SkipPm2Restart -and $KeyPath) {
     if (-not (Test-Path -LiteralPath $KeyPath)) {
         Write-Host ""
-        Write-Host "KeyPath not found: $KeyPath — skipping PM2 restart." -ForegroundColor Yellow
+        Write-Host "KeyPath not found: $KeyPath - skipping PM2 restart." -ForegroundColor Yellow
     } else {
         $publicIp = aws cloudformation describe-stacks --stack-name $StackName --region $deployRegion `
             --query "Stacks[0].Outputs[?OutputKey=='PublicIP'].OutputValue" --output text 2>&1

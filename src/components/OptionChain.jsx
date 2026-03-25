@@ -11,11 +11,14 @@ import {
   ArrowDownCircle,
   Target,
 } from "lucide-react";
+import { useAuth } from "../context/AuthContext.jsx";
+import { bearerAuthHeaders } from "../utils/authToken";
 
 const NIFTY_STEP = 50;
 const VISIBLE_RANGE = 15;
 
-export const OptionChain = ({ token }) => {
+export const OptionChain = () => {
+  const { accessToken: token } = useAuth();
   const [chain, setChain] = useState([]);
   const [spotPrice, setSpotPrice] = useState(0);
   const [expiryDate, setExpiryDate] = useState("");
@@ -38,7 +41,7 @@ export const OptionChain = ({ token }) => {
     try {
       const res = await fetch(
         `${API_BASE}/api/option-chain?expiry_type=${expiryType}`,
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers: bearerAuthHeaders(token) }
       );
       const text = await res.text();
       let json;
