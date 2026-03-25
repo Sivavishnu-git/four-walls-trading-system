@@ -97,7 +97,62 @@ function App() {
   const tokenExpired = !isValidAccessToken(accessToken);
 
   if (tokenExpired) {
-    return <LoginPage />;
+    return (
+      <div
+        style={{
+          minHeight: "100vh",
+          width: "100%",
+          maxWidth: "100vw",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: "8px",
+            background: "#131722",
+            borderBottom: "2px solid #2a2e39",
+            padding: "0 16px",
+            minHeight: 52,
+            boxSizing: "border-box",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <TrendingUp size={22} color="#26a69a" strokeWidth={2} />
+            <div>
+              <div style={{ fontWeight: 700, color: "#fff", fontSize: "1rem", letterSpacing: "-0.02em" }}>
+                Four Walls Trading
+              </div>
+              <div style={{ fontSize: "0.7rem", color: "#888", fontWeight: 500 }}>
+                Nifty futures &amp; OI tools
+              </div>
+            </div>
+          </div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "6px 12px",
+              borderRadius: 6,
+              background: "rgba(239,83,80,0.15)",
+              border: "1px solid rgba(239,83,80,0.35)",
+              color: "#ef5350",
+              fontSize: "0.8rem",
+              fontWeight: 600,
+            }}
+          >
+            <LogIn size={14} />
+            Login required
+          </div>
+        </div>
+        <LoginPage embeddedHeader />
+      </div>
+    );
   }
 
   const tabStyle = (id, color) => ({

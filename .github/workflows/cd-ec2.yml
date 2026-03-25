@@ -53,10 +53,13 @@ jobs:
             echo "EC2_HOST secret is not set"; exit 1
           fi
 
+      # SSH must reach the instance public IP / EIP — not the ALB hostname (ALB has no port 22).
+      # Security group must allow GitHub Actions: inbound TCP 22 from 0.0.0.0/0 (simplest) or
+      # https://api.github.com/meta (actions key in the JSON) — runner IPs change every job.
       - name: Sync repo to EC2
         run: |
           rsync -avz --delete \
-            -e "ssh -i ~/.ssh/ec2_key -o StrictHostKeyChecking=no" \
+            -e "ssh -i ~/.ssh/ec2_key -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=3" \
             --exclude node_modules \
             --exclude .git \
             --exclude .env \
@@ -66,7 +69,14 @@ jobs:
 
       - name: Deploy services on EC2
         run: |
-          ssh -i ~/.ssh/ec2_key -o StrictHostKeyChecking=no "$EC2_USER@$EC2_HOST" << 'EOF'
+          ssh -i ~/.ssh/ec2_key \
+            -o BatchMode=yes \
+            -o RequestTTY=no \
+            -o StrictHostKeyChecking=accept-new \
+            -o ConnectTimeout=30 \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=3 \
+            "$EC2_USER@$EC2_HOST" << 'EOF'
           set -euo pipefail
           cd "$HOME/app" || cd /home/ubuntu/app
           npm install --omit=dev

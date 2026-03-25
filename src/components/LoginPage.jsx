@@ -5,17 +5,18 @@ import { isValidAccessToken, normalizeAccessToken } from "../utils/authToken";
 
 /**
  * Shown when no Upstox access token is present. OAuth or paste token (stored via AuthContext).
+ * @param {{ embeddedHeader?: boolean }} props — when true, hide card title (App shows top bar).
  */
-export function LoginPage() {
+export function LoginPage({ embeddedHeader = false }) {
   const { saveAccessToken, loginRedirect } = useAuth();
   const [tokenInput, setTokenInput] = useState("");
   const [pasteError, setPasteError] = useState(null);
 
   const handleUsePastedToken = () => {
     const t = normalizeAccessToken(tokenInput);
-    if (t.length < MIN_ACCESS_TOKEN_LEN) {
+    if (!isValidAccessToken(t)) {
       setPasteError(
-        `Enter a token at least ${MIN_ACCESS_TOKEN_LEN} characters (optional "Bearer " prefix is stripped).`,
+        "Enter a real Upstox access token (at least 20 characters; optional Bearer prefix). Example placeholders from .env are not accepted.",
       );
       return;
     }
@@ -27,9 +28,9 @@ export function LoginPage() {
     <div
       className="login-page-root"
       style={{
-        flex: 1,
+        flex: embeddedHeader ? 1 : undefined,
         alignSelf: "stretch",
-        minHeight: "100vh",
+        minHeight: embeddedHeader ? "calc(100vh - 52px)" : "100vh",
         width: "100%",
         display: "flex",
         flexDirection: "column",
@@ -52,6 +53,7 @@ export function LoginPage() {
           boxShadow: "0 24px 48px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.03) inset",
         }}
       >
+        {!embeddedHeader && (
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 28 }}>
           <div
             style={{
@@ -76,8 +78,9 @@ export function LoginPage() {
             </p>
           </div>
         </div>
+        )}
 
-        <p style={{ margin: "0 0 24px", fontSize: "0.95rem", color: "#b0b3c0", lineHeight: 1.55 }}>
+        <p style={{ margin: embeddedHeader ? "0 0 20px" : "0 0 24px", fontSize: "0.95rem", color: "#b0b3c0", lineHeight: 1.55 }}>
           Sign in with your <strong style={{ color: "#e0e0e0" }}>Upstox</strong> account to load live quotes, orders, and
           portfolio data. You will be redirected to Upstox to approve access.
         </p>
