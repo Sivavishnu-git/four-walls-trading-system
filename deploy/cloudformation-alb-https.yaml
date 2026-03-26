@@ -18,11 +18,13 @@ Parameters:
 
   PublicSubnet1:
     Type: AWS::EC2::Subnet::Id
-    Description: First public subnet (different AZ than PublicSubnet2)
+    Description: >
+      Public subnet in AZ A. One of PublicSubnet1/PublicSubnet2 MUST be in the same AZ as the EC2
+      target or registered targets stay "Unused" (ALB only routes to AZs where it has subnets).
 
   PublicSubnet2:
     Type: AWS::EC2::Subnet::Id
-    Description: Second public subnet (ALB requires 2 AZs)
+    Description: Public subnet in a different AZ than PublicSubnet1 (ALB requires 2 AZs)
 
   EC2InstanceId:
     Type: String

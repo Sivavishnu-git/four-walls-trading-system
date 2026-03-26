@@ -38,13 +38,6 @@ const AuthContext = createContext(null);
 export function AuthProvider({ children }) {
   const [accessToken, setAccessTokenState] = useState(readInitialAccessToken);
 
-  const saveAccessToken = useCallback((raw) => {
-    const t = typeof raw === "string" ? normalizeAccessToken(raw) : "";
-    if (!isValidAccessToken(t)) return;
-    localStorage.setItem(STORAGE_KEY, t);
-    setAccessTokenState(t);
-  }, []);
-
   const loginRedirect = useCallback(() => {
     window.location.href = AUTH_LOGIN_URL;
   }, []);
@@ -52,10 +45,9 @@ export function AuthProvider({ children }) {
   const value = useMemo(
     () => ({
       accessToken,
-      saveAccessToken,
       loginRedirect,
     }),
-    [accessToken, saveAccessToken, loginRedirect],
+    [accessToken, loginRedirect],
   );
 
   return (

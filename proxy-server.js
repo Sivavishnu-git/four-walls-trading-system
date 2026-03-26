@@ -9,6 +9,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { promisify } from "util";
 import crypto from "crypto";
+import { setTimeout as sleep } from "timers/promises";
 import { updateEnvToken } from "./utils/tokenManager.js";
 import { computeIntradayPivots } from "./src/utils/intradayPivots.js";
 
@@ -41,24 +42,42 @@ const loadCompleteData = async () => {
   if (COMPLETE_CACHE.data && COMPLETE_CACHE.lastFetched === today) {
     return COMPLETE_CACHE.data;
   }
-  try {
-    console.log("📥 Downloading Complete Master List...");
-    const response = await axios.get(COMPLETE_URL, {
-      responseType: 'arraybuffer',
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+  const maxAttempts = 5;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      console.log(`📥 Downloading Complete Master List (attempt ${attempt}/${maxAttempts})...`);
+      const response = await axios.get(COMPLETE_URL, {
+        responseType: "arraybuffer",
+        timeout: 60000,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          Accept: "*/*",
+        },
+      });
+      if (response.status !== 200) {
+        throw new Error(`HTTP ${response.status}`);
       }
-    });
-    const decompressed = await gunzip(response.data);
-    const data = JSON.parse(decompressed.toString());
-    COMPLETE_CACHE.data = data;
-    COMPLETE_CACHE.lastFetched = today;
-    console.log(`✅ Loaded ${data.length} instruments`);
-    return data;
-  } catch (err) {
-    console.error("Error fetching master list:", err.message);
-    return COMPLETE_CACHE.data;
+      const decompressed = await gunzip(response.data);
+      const data = JSON.parse(decompressed.toString());
+      if (!Array.isArray(data)) {
+        throw new Error("Master list JSON is not an array");
+      }
+      COMPLETE_CACHE.data = data;
+      COMPLETE_CACHE.lastFetched = today;
+      console.log(`✅ Loaded ${data.length} instruments`);
+      return data;
+    } catch (err) {
+      const detail = err.response?.status ?? err.code ?? err.message;
+      console.error(`Master list fetch attempt ${attempt}/${maxAttempts} failed:`, detail);
+      if (attempt < maxAttempts) {
+        await sleep(1500 * attempt);
+      } else {
+        console.error("Error fetching master list (giving up):", err.message);
+        return COMPLETE_CACHE.data;
+      }
+    }
   }
+  return COMPLETE_CACHE.data;
 };
 
 const getMasterData = async (exchange) => {
@@ -82,6 +101,11 @@ const FRONTEND_URI = IS_PROD
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
   next();
+});
+
+/** No external deps — use to verify Node is up (ALB/nginx can still use GET / on port 80). */
+app.get("/api/health", (_req, res) => {
+  res.json({ status: "ok", service: "livetrading-proxy" });
 });
 
 // --- AUTH ENDPOINTS ---
@@ -173,40 +197,6 @@ app.get("/api/auth/callback", async (req, res) => {
   }
 });
 
-// Manual Token Update Endpoint
-app.post("/api/auth/update-token", (req, res) => {
-  try {
-    const { token } = req.body;
-
-    if (!token) {
-      return res.status(400).json({
-        success: false,
-        error: "Token is required in request body",
-      });
-    }
-
-    const updated = updateEnvToken(token);
-
-    if (updated) {
-      res.json({
-        success: true,
-        message: "Token updated successfully in .env file",
-        note: "Please restart the frontend to use the new token",
-      });
-    } else {
-      res.status(500).json({
-        success: false,
-        error: "Failed to update token in .env file",
-      });
-    }
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
-  }
-});
-
 // Proxy Endpoint for Historical Data
 app.get("/api/historical", async (req, res) => {
   try {
@@ -256,7 +246,13 @@ app.get("/api/historical", async (req, res) => {
 app.get("/api/tools/discover-nifty-future", async (req, res) => {
   try {
     const instruments = await getMasterData("NFO");
-    if (!instruments) return res.status(500).json({ error: "Could not load NFO master list" });
+    if (!instruments) {
+      return res.status(503).json({
+        status: "error",
+        error:
+          "Could not load NFO master list from Upstox (assets.upstox.com). Check server outbound HTTPS/DNS and PM2 logs.",
+      });
+    }
 
     // Filter for NIFTY Futures
     const niftyFutures = instruments.filter(

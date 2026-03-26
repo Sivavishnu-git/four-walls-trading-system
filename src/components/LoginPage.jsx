@@ -1,28 +1,12 @@
-import { useState } from "react";
-import { KeyRound, LogIn, Shield, TrendingUp } from "lucide-react";
+import { LogIn, Shield, TrendingUp } from "lucide-react";
 import { useAuth } from "../context/AuthContext.jsx";
-import { isValidAccessToken, normalizeAccessToken } from "../utils/authToken";
 
 /**
- * Shown when no Upstox access token is present. OAuth or paste token (stored via AuthContext).
+ * Shown when no Upstox access token is present. OAuth via AuthContext (callback ?token=).
  * @param {{ embeddedHeader?: boolean }} props — when true, hide card title (App shows top bar).
  */
 export function LoginPage({ embeddedHeader = false }) {
-  const { saveAccessToken, loginRedirect } = useAuth();
-  const [tokenInput, setTokenInput] = useState("");
-  const [pasteError, setPasteError] = useState(null);
-
-  const handleUsePastedToken = () => {
-    const t = normalizeAccessToken(tokenInput);
-    if (!isValidAccessToken(t)) {
-      setPasteError(
-        "Enter a real Upstox access token (at least 20 characters; optional Bearer prefix). Example placeholders from .env are not accepted.",
-      );
-      return;
-    }
-    setPasteError(null);
-    saveAccessToken(t);
-  };
+  const { loginRedirect } = useAuth();
 
   return (
     <div
@@ -107,77 +91,6 @@ export function LoginPage({ embeddedHeader = false }) {
         >
           <LogIn size={20} strokeWidth={2.5} />
           Sign in with Upstox
-        </button>
-
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 14,
-            margin: "22px 0 18px",
-          }}
-        >
-          <div style={{ flex: 1, height: 1, background: "rgba(42, 46, 57, 0.9)" }} />
-          <span style={{ fontSize: "0.75rem", color: "#666", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-            or paste token
-          </span>
-          <div style={{ flex: 1, height: 1, background: "rgba(42, 46, 57, 0.9)" }} />
-        </div>
-
-        <label htmlFor="login-access-token" style={{ display: "block", fontSize: "0.8rem", fontWeight: 600, color: "#9aa0ae", marginBottom: 8 }}>
-          Access token
-        </label>
-        <textarea
-          id="login-access-token"
-          value={tokenInput}
-          onChange={(e) => {
-            setTokenInput(e.target.value);
-            if (pasteError) setPasteError(null);
-          }}
-          placeholder="Paste Upstox access token (Bearer prefix optional)"
-          spellCheck={false}
-          autoComplete="off"
-          rows={3}
-          style={{
-            width: "100%",
-            boxSizing: "border-box",
-            padding: "12px 14px",
-            fontSize: "0.8rem",
-            fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-            lineHeight: 1.45,
-            color: "#e8e8e8",
-            background: "rgba(0,0,0,0.35)",
-            border: "1px solid rgba(42, 46, 57, 0.95)",
-            borderRadius: 10,
-            resize: "vertical",
-            minHeight: 72,
-            marginBottom: 10,
-          }}
-        />
-        {pasteError && (
-          <p style={{ margin: "0 0 12px", fontSize: "0.78rem", color: "#ef5350" }}>{pasteError}</p>
-        )}
-        <button
-          type="button"
-          onClick={handleUsePastedToken}
-          style={{
-            width: "100%",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 8,
-            padding: "12px 18px",
-            fontSize: "0.95rem",
-            fontWeight: 600,
-            color: "#2962ff",
-            background: "rgba(41, 98, 255, 0.12)",
-            border: "1px solid rgba(41, 98, 255, 0.35)",
-            borderRadius: 10,
-            cursor: "pointer",
-          }}
-        >
-          <KeyRound size={18} />
-          Continue with pasted token
         </button>
 
         <div

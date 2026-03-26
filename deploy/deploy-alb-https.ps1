@@ -75,23 +75,39 @@ if (-not $vpc -or $vpc -eq "None") {
     exit 1
 }
 
+$instAz = aws ec2 describe-instances --instance-ids $ec2Id --region $Region --query "Reservations[0].Instances[0].Placement.AvailabilityZone" --output text
+if (-not $instAz -or $instAz -eq "None") {
+    Write-Host "Could not read instance AZ for $ec2Id" -ForegroundColor Red
+    exit 1
+}
+
 $subnetsRaw = aws ec2 describe-subnets --filters "Name=vpc-id,Values=$vpc" --region $Region --output json | ConvertFrom-Json
 $public = @($subnetsRaw.Subnets | Where-Object { $_.MapPublicIpOnLaunch -eq $true })
 if ($public.Count -lt 2) {
     $public = @($subnetsRaw.Subnets)
 }
-$perAz = @($public | Group-Object AvailabilityZone | ForEach-Object { $_.Group | Select-Object -First 1 })
-if ($perAz.Count -lt 2) {
-    Write-Host "Need at least 2 subnets in different Availability Zones in VPC $vpc for ALB. Found $($perAz.Count) AZ(s)." -ForegroundColor Red
+
+# ALB must cover the EC2 AZ or targets stay "Unused" (ALB only routes to AZs where it has subnets).
+$subnetInEc2Az = $public | Where-Object { $_.AvailabilityZone -eq $instAz } | Select-Object -First 1
+if (-not $subnetInEc2Az) {
+    Write-Host ""
+    Write-Host "No public subnet (MapPublicIpOnLaunch) in the same AZ as EC2 ($instAz)." -ForegroundColor Red
+    Write-Host "Create a public subnet in $instAz or move the instance to an AZ that has one." -ForegroundColor Yellow
     exit 1
 }
-$subnet1 = $perAz[0].SubnetId
-$subnet2 = $perAz[1].SubnetId
+$otherAz = @($public | Where-Object { $_.AvailabilityZone -ne $instAz })
+if ($otherAz.Count -lt 1) {
+    Write-Host "Need a second public subnet in a different AZ than $instAz for ALB. Found none." -ForegroundColor Red
+    exit 1
+}
+
+$subnet1 = $subnetInEc2Az.SubnetId
+$subnet2 = ($otherAz | Select-Object -First 1).SubnetId
 
 Write-Host ""
-Write-Host "EC2 instance:     $ec2Id" -ForegroundColor DarkGray
+Write-Host "EC2 instance:     $ec2Id (AZ $instAz)" -ForegroundColor DarkGray
 Write-Host "VPC:              $vpc" -ForegroundColor DarkGray
-Write-Host "Subnets (ALB):    $subnet1 , $subnet2" -ForegroundColor DarkGray
+Write-Host "Subnets (ALB):    $subnet1 , $subnet2  (one subnet is always in the instance AZ — avoids Unused)" -ForegroundColor DarkGray
 Write-Host "Domain:           $DomainName" -ForegroundColor DarkGray
 Write-Host ""
 Write-Host "Deploying ALB stack '$AlbStackName' (ACM DNS validation can take several minutes)..." -ForegroundColor Cyan
