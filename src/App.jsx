@@ -1,27 +1,35 @@
 import React, { useState, useEffect } from "react";
-import { API_BASE } from "./config";
+import { apiFetch } from "./api/client.js";
 import { useAuth } from "./context/AuthContext.jsx";
-import { bearerAuthHeaders, isValidAccessToken } from "./utils/authToken";
-import { Activity, BarChart3, LogIn, Target, Crosshair, ShoppingCart, TrendingUp } from "lucide-react";
+import { isValidAccessToken } from "./utils/authToken";
+import { Activity, LogIn, TrendingUp } from "lucide-react";
 import { OIMonitor } from "./components/OIMonitor";
-import { HistoricalData } from "./components/HistoricalData";
-import { OptionChain } from "./components/OptionChain";
-import { TradeSetup } from "./components/TradeSetup";
-import { OrderPanel } from "./components/OrderPanel";
-import { TradingViewChart } from "./components/TradingViewChart";
-import { LoginPage } from "./components/LoginPage";
 
 class TabErrorBoundary extends React.Component {
   state = { hasError: false, error: null };
-  static getDerivedStateFromError(error) { return { hasError: true, error }; }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
   render() {
     if (this.state.hasError) {
       return (
         <div style={{ padding: "40px", textAlign: "center", color: "#ef5350" }}>
           <h3>Something went wrong in this tab</h3>
-          <pre style={{ fontSize: "0.8rem", color: "#888", whiteSpace: "pre-wrap" }}>{this.state.error?.message}</pre>
-          <button onClick={() => this.setState({ hasError: false, error: null })}
-            style={{ marginTop: "12px", padding: "8px 20px", background: "rgba(41,98,255,0.15)", border: "1px solid rgba(41,98,255,0.4)", color: "#2962ff", borderRadius: "6px", cursor: "pointer" }}>
+          <pre style={{ fontSize: "0.8rem", color: "#888", whiteSpace: "pre-wrap" }}>
+            {this.state.error?.message}
+          </pre>
+          <button
+            onClick={() => this.setState({ hasError: false, error: null })}
+            style={{
+              marginTop: "12px",
+              padding: "8px 20px",
+              background: "rgba(41,98,255,0.15)",
+              border: "1px solid rgba(41,98,255,0.4)",
+              color: "#2962ff",
+              borderRadius: "6px",
+              cursor: "pointer",
+            }}
+          >
             Retry
           </button>
         </div>
@@ -31,19 +39,27 @@ class TabErrorBoundary extends React.Component {
   }
 }
 
-function App() {
-  const { accessToken, loginRedirect } = useAuth();
+const OAUTH_ERROR_HINTS = {
+  token_exchange_failed: "Could not exchange the login code for a token. Check API secret and redirect URL on the server.",
+  no_code: "Upstox did not return an authorization code. Try signing in again.",
+};
 
-  const [instrumentKey, setInstrumentKey] = useState(
-    import.meta.env.VITE_INSTRUMENT_KEY || ""
-  );
+function formatOAuthError(code) {
+  if (!code) return "";
+  const hint = OAUTH_ERROR_HINTS[code];
+  return hint ? `${hint} (${code})` : code;
+}
+
+function App() {
+  const { accessToken, loginRedirect, oauthError, clearOAuthError } = useAuth();
+
+  const [instrumentKey, setInstrumentKey] = useState(import.meta.env.VITE_INSTRUMENT_KEY || "");
   const [instrumentSymbol, setInstrumentSymbol] = useState("");
-  const [page, setPage] = useState("oi");
   const [niftyFutLtp, setNiftyFutLtp] = useState(null);
   const [niftyFutChange, setNiftyFutChange] = useState(null);
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/tools/discover-nifty-future`)
+    apiFetch("/api/tools/discover-nifty-future")
       .then((r) => r.json())
       .then((json) => {
         if (json.status === "success" && json.data?.instrument_key) {
@@ -63,14 +79,9 @@ function App() {
     let cancelled = false;
     const tick = async () => {
       try {
-        const res = await fetch(
-          `${API_BASE}/api/quotes?instrument_keys=${encodeURIComponent(instrumentKey)}`,
-          {
-            headers: {
-              ...bearerAuthHeaders(accessToken),
-              Accept: "application/json",
-            },
-          },
+        const res = await apiFetch(
+          `/api/quotes?instrument_keys=${encodeURIComponent(instrumentKey)}`,
+          { accessToken },
         );
         const json = await res.json();
         if (cancelled || !json?.data) return;
@@ -124,12 +135,12 @@ function App() {
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <TrendingUp size={22} color="#26a69a" strokeWidth={2} />
             <div>
-              <div style={{ fontWeight: 700, color: "#fff", fontSize: "1rem", letterSpacing: "-0.02em" }}>
+              <div
+                style={{ fontWeight: 700, color: "#fff", fontSize: "1rem", letterSpacing: "-0.02em" }}
+              >
                 Four Walls Trading
               </div>
-              <div style={{ fontSize: "0.7rem", color: "#888", fontWeight: 500 }}>
-                Nifty futures &amp; OI tools
-              </div>
+              <div style={{ fontSize: "0.7rem", color: "#888", fontWeight: 500 }}>OI Monitor</div>
             </div>
           </div>
           <div
@@ -150,25 +161,91 @@ function App() {
             Login required
           </div>
         </div>
-        <LoginPage embeddedHeader />
+        <div
+          style={{
+            flex: 1,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "24px",
+            boxSizing: "border-box",
+            background: "#131722",
+          }}
+        >
+          {oauthError ? (
+            <div
+              style={{
+                marginBottom: 20,
+                padding: "12px 16px",
+                maxWidth: 440,
+                borderRadius: 8,
+                background: "rgba(239,83,80,0.12)",
+                border: "1px solid rgba(239,83,80,0.35)",
+                color: "#ffb4b4",
+                fontSize: "0.88rem",
+                lineHeight: 1.5,
+              }}
+            >
+              {formatOAuthError(oauthError)}
+              <button
+                type="button"
+                onClick={clearOAuthError}
+                style={{
+                  display: "block",
+                  marginTop: 10,
+                  padding: "6px 12px",
+                  fontSize: "0.8rem",
+                  cursor: "pointer",
+                  background: "transparent",
+                  border: "1px solid rgba(255,255,255,0.25)",
+                  color: "#ccc",
+                  borderRadius: 6,
+                }}
+              >
+                Dismiss
+              </button>
+            </div>
+          ) : null}
+          <p
+            style={{
+              margin: "0 0 20px",
+              fontSize: "0.95rem",
+              color: "#b0b3c0",
+              textAlign: "center",
+              maxWidth: 400,
+              lineHeight: 1.55,
+            }}
+          >
+            Sign in with <strong style={{ color: "#e0e0e0" }}>Upstox</strong>. After you approve access, you are sent
+            back to this app with a token in the redirect URL; that token is saved here for API calls.
+          </p>
+          <button
+            type="button"
+            onClick={loginRedirect}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 10,
+              padding: "12px 24px",
+              fontSize: "0.95rem",
+              fontWeight: 700,
+              color: "#fff",
+              background: "linear-gradient(180deg, #2a7d6e 0%, #1e6b5e 100%)",
+              border: "1px solid rgba(38,166,154,0.5)",
+              borderRadius: 10,
+              cursor: "pointer",
+              boxShadow: "0 4px 14px rgba(38, 166, 154, 0.25)",
+            }}
+          >
+            <LogIn size={18} strokeWidth={2.5} />
+            Sign in with Upstox
+          </button>
+        </div>
       </div>
     );
   }
-
-  const tabStyle = (id, color) => ({
-    padding: "14px 24px",
-    background: "transparent",
-    border: "none",
-    borderBottom: page === id ? `3px solid ${color}` : "3px solid transparent",
-    color: page === id ? color : "#666",
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    gap: "8px",
-    fontSize: "0.9rem",
-    fontWeight: 600,
-    transition: "all 0.2s",
-  });
 
   return (
     <div
@@ -182,42 +259,29 @@ function App() {
         flexDirection: "column",
       }}
     >
-      <div style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        background: "#131722",
-        borderBottom: "2px solid #2a2e39",
-        padding: "0 16px",
-        flexWrap: "wrap",
-        gap: "8px",
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "0" }}>
-          <button onClick={() => setPage("oi")} style={tabStyle("oi", "#26a69a")}>
-            <Activity size={16} /> OI Monitor
-          </button>
-          <button onClick={() => setPage("historical")} style={tabStyle("historical", "#2962ff")}>
-            <BarChart3 size={16} /> Historical Data
-          </button>
-          <button onClick={() => setPage("optionchain")} style={tabStyle("optionchain", "#ff9800")}>
-            <Target size={16} /> OI Analysis
-          </button>
-          <button onClick={() => setPage("tradesetup")} style={tabStyle("tradesetup", "#2962ff")}>
-            <Crosshair size={16} /> Trade Setup
-          </button>
-          <button onClick={() => setPage("chart")} style={tabStyle("chart", "#e040fb")}>
-            <TrendingUp size={16} /> Chart
-          </button>
-          <button onClick={() => setPage("orders")} style={tabStyle("orders", "#ff9800")}>
-            <ShoppingCart size={16} /> Orders
-          </button>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          background: "#131722",
+          borderBottom: "2px solid #2a2e39",
+          padding: "0 16px",
+          flexWrap: "wrap",
+          gap: "8px",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <Activity size={20} color="#26a69a" strokeWidth={2} />
+          <div>
+            <div style={{ fontWeight: 700, color: "#fff", fontSize: "0.95rem" }}>OI Monitor</div>
+            <div style={{ fontSize: "0.7rem", color: "#888" }}>Four Walls Trading</div>
+          </div>
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
           {instrumentSymbol && (
-            <span style={{ color: "#26a69a", fontSize: "0.8rem", fontWeight: 600 }}>
-              {instrumentSymbol}
-            </span>
+            <span style={{ color: "#26a69a", fontSize: "0.8rem", fontWeight: 600 }}>{instrumentSymbol}</span>
           )}
           {niftyFutLtp != null && (
             <span
@@ -248,25 +312,6 @@ function App() {
               )}
             </span>
           )}
-          <button
-            onClick={loginRedirect}
-            style={{
-              padding: "8px 16px",
-              background: tokenExpired ? "rgba(239,83,80,0.2)" : "rgba(38,166,154,0.15)",
-              border: `1px solid ${tokenExpired ? "rgba(239,83,80,0.4)" : "rgba(38,166,154,0.3)"}`,
-              color: tokenExpired ? "#ef5350" : "#26a69a",
-              borderRadius: "6px",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: "6px",
-              fontSize: "0.8rem",
-              fontWeight: 600,
-            }}
-          >
-            <LogIn size={14} />
-            {tokenExpired ? "Login Required" : "Re-Login"}
-          </button>
         </div>
       </div>
 
@@ -278,31 +323,9 @@ function App() {
           position: "relative",
         }}
       >
-        <div style={{ display: page === "oi" ? "block" : "none", minHeight: "calc(100vh - 52px)", overflow: "auto" }}>
-          <TabErrorBoundary><OIMonitor instrumentKey={instrumentKey} /></TabErrorBoundary>
-        </div>
-        <div style={{ display: page === "historical" ? "block" : "none", minHeight: "calc(100vh - 52px)", overflow: "auto" }}>
-          <TabErrorBoundary>
-            <HistoricalData
-              instrumentKey={instrumentKey}
-              instrumentSymbol={instrumentSymbol}
-            />
-          </TabErrorBoundary>
-        </div>
-        <div style={{ display: page === "optionchain" ? "block" : "none", minHeight: "calc(100vh - 52px)", overflow: "auto" }}>
-          <TabErrorBoundary><OptionChain /></TabErrorBoundary>
-        </div>
-        <div style={{ display: page === "tradesetup" ? "block" : "none", minHeight: "calc(100vh - 52px)", overflow: "auto" }}>
-          <TabErrorBoundary><TradeSetup /></TabErrorBoundary>
-        </div>
-        <div style={{ display: page === "chart" ? "block" : "none", height: "calc(100vh - 52px)", minHeight: 360, overflow: "hidden" }}>
-          {page === "chart" && (
-            <TabErrorBoundary><TradingViewChart /></TabErrorBoundary>
-          )}
-        </div>
-        <div style={{ display: page === "orders" ? "block" : "none", minHeight: "calc(100vh - 52px)", overflow: "auto" }}>
-          <TabErrorBoundary><OrderPanel /></TabErrorBoundary>
-        </div>
+        <TabErrorBoundary>
+          <OIMonitor instrumentKey={instrumentKey} />
+        </TabErrorBoundary>
       </div>
     </div>
   );

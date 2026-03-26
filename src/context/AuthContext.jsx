@@ -10,18 +10,7 @@ import { normalizeAccessToken, isValidAccessToken } from "../utils/authToken";
 
 const STORAGE_KEY = "upstox_access_token";
 
-function readInitialAccessToken() {
-  const params = new URLSearchParams(window.location.search);
-  const urlToken = params.get("token");
-  if (urlToken) {
-    const t = normalizeAccessToken(urlToken);
-    window.history.replaceState({}, "", window.location.pathname);
-    if (isValidAccessToken(t)) {
-      localStorage.setItem(STORAGE_KEY, t);
-      return t;
-    }
-    return "";
-  }
+function readStoredToken() {
   const fromLs = localStorage.getItem(STORAGE_KEY) || "";
   /** In production, never seed session from Vite env (avoids skipping login when token is baked into the bundle). */
   const fromEnv = import.meta.env.DEV ? (import.meta.env.VITE_UPSTOX_ACCESS_TOKEN || "") : "";
@@ -33,21 +22,57 @@ function readInitialAccessToken() {
   return candidate;
 }
 
+/**
+ * OAuth callback lands on FRONTEND_URI with ?token=... or ?error=...
+ * That query is the source of truth on load; we persist token to localStorage and strip the URL.
+ */
+function readAuthFromRedirectUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const urlToken = params.get("token");
+  if (urlToken != null && urlToken !== "") {
+    const t = normalizeAccessToken(urlToken);
+    const path = window.location.pathname;
+    window.history.replaceState({}, "", path);
+    if (isValidAccessToken(t)) {
+      localStorage.setItem(STORAGE_KEY, t);
+      return { accessToken: t, oauthError: "" };
+    }
+    localStorage.removeItem(STORAGE_KEY);
+    return { accessToken: "", oauthError: "" };
+  }
+
+  const err = params.get("error");
+  if (err) {
+    const path = window.location.pathname;
+    window.history.replaceState({}, "", path);
+    return { accessToken: readStoredToken(), oauthError: err };
+  }
+
+  return { accessToken: readStoredToken(), oauthError: "" };
+}
+
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [accessToken, setAccessTokenState] = useState(readInitialAccessToken);
+  const [{ accessToken, oauthError }, setAuth] = useState(readAuthFromRedirectUrl);
+
+  const clearOAuthError = useCallback(() => {
+    setAuth((prev) => ({ ...prev, oauthError: "" }));
+  }, []);
 
   const loginRedirect = useCallback(() => {
+    clearOAuthError();
     window.location.href = AUTH_LOGIN_URL;
-  }, []);
+  }, [clearOAuthError]);
 
   const value = useMemo(
     () => ({
       accessToken,
+      oauthError,
+      clearOAuthError,
       loginRedirect,
     }),
-    [accessToken, loginRedirect],
+    [accessToken, oauthError, clearOAuthError, loginRedirect],
   );
 
   return (

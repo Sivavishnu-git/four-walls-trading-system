@@ -1,6 +1,5 @@
 import { useEffect, useState, useRef } from "react";
 import { useAuth } from "../context/AuthContext.jsx";
-import { bearerAuthHeaders } from "../utils/authToken";
 import {
     TrendingUp,
     TrendingDown,
@@ -8,7 +7,7 @@ import {
     RefreshCw,
 } from "lucide-react";
 import { useUpstoxPolling } from "../hooks/useUpstoxPolling";
-import { API_BASE } from "../config";
+import { apiFetch } from "../api/client.js";
 // import { MarketTrendAnalysis } from './MarketTrendAnalysis';
 // import { OptionEntryPlanner } from './OptionEntryPlanner';
 
@@ -177,11 +176,9 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
                     .split("T")[0];
 
                 console.log(`Fetching history for Previous OI: ${instrumentKey}`);
-                const response = await fetch(
-                    `${API_BASE}/api/historical?instrument_key=${encodeURIComponent(instrumentKey)}&interval=day&to_date=${today}&from_date=${fiveDaysAgo}`,
-                    {
-                        headers: bearerAuthHeaders(token),
-                    },
+                const response = await apiFetch(
+                    `/api/historical?instrument_key=${encodeURIComponent(instrumentKey)}&interval=day&to_date=${today}&from_date=${fiveDaysAgo}`,
+                    { accessToken: token },
                 );
 
                 const json = await response.json();

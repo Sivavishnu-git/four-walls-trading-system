@@ -161,9 +161,6 @@ Procfile
 railway.json
 render.yaml
 
-# Standalone server (use proxy-server.js instead)
-server.js
-
 # Trading logs and history
 trading_logs/
 order_history/

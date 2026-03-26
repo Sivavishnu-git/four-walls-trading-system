@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { API_BASE } from "../config";
-import { normalizeAccessToken } from "../utils/authToken";
+import { apiFetch } from "../api/client.js";
 
 /**
  * useUpstoxPolling Hook
@@ -22,15 +21,12 @@ export const useUpstoxPolling = (accessToken, instrumentKeys = [], interval = 20
         if (!accessToken || instrumentKeys.length === 0) return;
 
         try {
-            const cleanToken = normalizeAccessToken(accessToken);
             const keysParam = instrumentKeys.join(",");
 
-            const response = await fetch(`${API_BASE}/api/quotes?instrument_keys=${encodeURIComponent(keysParam)}`, {
-                headers: {
-                    "Authorization": `Bearer ${cleanToken}`,
-                    "Accept": "application/json"
-                }
-            });
+            const response = await apiFetch(
+                `/api/quotes?instrument_keys=${encodeURIComponent(keysParam)}`,
+                { accessToken },
+            );
 
             if (!response.ok) {
                 const errData = await response.json().catch(() => ({}));
@@ -42,9 +38,6 @@ export const useUpstoxPolling = (accessToken, instrumentKeys = [], interval = 20
             // Transform Upstox V2 Quote format to match the internal 'data' structure
             // V2 response structure: { data: { "INSTRUMENT_KEY": { ... } } }
             if (resData.data) {
-                console.log("🔥 API Response for keys:", instrumentKeys);
-                console.log("📦 Raw Data:", JSON.stringify(resData.data, null, 2));
-
                 const updates = {};
                 Object.keys(resData.data).forEach(key => {
                     const quote = resData.data[key];
