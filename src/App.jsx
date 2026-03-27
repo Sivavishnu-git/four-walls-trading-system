@@ -283,27 +283,6 @@ function App() {
           {instrumentSymbol && (
             <span style={{ color: "#26a69a", fontSize: "0.8rem", fontWeight: 600 }}>{instrumentSymbol}</span>
           )}
-          <button
-            type="button"
-            onClick={loginWithUpstox}
-            title="Open Upstox login to generate a new access token"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              padding: "6px 12px",
-              fontSize: "0.8rem",
-              fontWeight: 600,
-              color: "#26a69a",
-              background: "rgba(38,166,154,0.12)",
-              border: "1px solid rgba(38,166,154,0.35)",
-              borderRadius: 8,
-              cursor: "pointer",
-            }}
-          >
-            <LogIn size={14} />
-            Login with Upstox
-          </button>
           {niftyFutLtp != null && (
             <span
               title="NIFTY future last traded price (LTP)"

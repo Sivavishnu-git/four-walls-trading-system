@@ -108,7 +108,6 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
 
     const {
         connect,
-        disconnect,
         data: liveData,
         status: wsStatus,
         error: pollingError,
@@ -341,16 +340,6 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
         connect();
     };
 
-    const handleDisconnect = () => {
-        setIsLive(false);
-        disconnect();
-        firstSessionOIRef.current = null; // Reset session base
-        if (intervalRef.current) {
-            clearInterval(intervalRef.current);
-            intervalRef.current = null;
-        }
-    };
-
     const formatNumber = (num) => {
         if (!num) return "0";
         return new Intl.NumberFormat("en-IN").format(num);
@@ -455,14 +444,9 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
                             Connect
                         </button>
                     ) : (
-                        <>
-                            <div style={{ fontSize: "0.8rem", color: "#888", paddingRight: "4px" }}>
-                                Base Offset: {formatNumber(initialOIChange)}
-                            </div>
-                            <button type="button" onClick={handleDisconnect} className="disconnect-btn">
-                                Disconnect
-                            </button>
-                        </>
+                        <div style={{ fontSize: "0.8rem", color: "#888", paddingRight: "4px" }}>
+                            Base Offset: {formatNumber(initialOIChange)}
+                        </div>
                     )}
                 </div>
             </div>
@@ -502,7 +486,7 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
                     className="stat-card"
                     style={{ borderColor: getChangeColor(oiChange) }}
                 >
-                    <div className="stat-label">OI Change (2 min)</div>
+                    <div className="stat-label">Session OI change</div>
                     <div
                         className="stat-value"
                         style={{ color: getChangeColor(oiChange) }}
@@ -512,8 +496,8 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
                     </div>
                     <div className="stat-subtitle">
                         {oiChange !== null && oiChange !== 0
-                            ? `${oiChange > 0 ? "+" : "-"}${Math.abs(oiChange).toFixed(2)}`
-                            : "No Change"}
+                            ? `${oiChange > 0 ? "+" : "-"}${Math.abs(oiChange).toFixed(2)} vs first capture`
+                            : "No change vs session start"}
                     </div>
                 </div>
 
