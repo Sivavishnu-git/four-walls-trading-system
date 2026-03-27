@@ -345,6 +345,61 @@ button:focus-visible {
   color: #aaa;
 }
 
+/* OI monitor — compact summary row (4 tiles, reference-style density) */
+.stats-grid-compact {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.stats-grid-compact .stat-card {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border-width: 1px;
+}
+
+.stats-grid-compact .stat-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+
+.stats-grid-compact .stat-label {
+  font-size: 0.65rem;
+  margin-bottom: 4px;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+}
+
+.stats-grid-compact .stat-value-compact {
+  font-size: 1rem;
+  font-weight: 700;
+  margin-bottom: 2px;
+  gap: 6px;
+  line-height: 1.25;
+}
+
+.stats-grid-compact .stat-subtitle-compact {
+  font-size: 0.7rem;
+  color: #888;
+  line-height: 1.35;
+}
+
+.stats-grid-compact .stat-trend-row {
+  flex-wrap: wrap;
+}
+
+.stats-grid-compact .stat-trend-text {
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+@media (max-width: 900px) {
+  .stats-grid-compact {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 /* History Section */
 .history-section {
   background: linear-gradient(135deg, #1e222d 0%, #252a38 100%);
@@ -491,6 +546,87 @@ button:focus-visible {
   color: #aaa;
 }
 
+/* OI change history — compact table (matches stats-grid-compact density) */
+.history-section-compact {
+  padding: 14px 16px;
+}
+
+.history-section-compact .section-header-compact {
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+}
+
+.history-section-compact .section-header-compact h2 {
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.history-section-compact .refresh-indicator {
+  font-size: 0.7rem;
+  gap: 6px;
+}
+
+.history-section-compact .refresh-indicator svg {
+  width: 14px;
+  height: 14px;
+}
+
+.oi-table-compact th {
+  padding: 8px 10px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+.oi-table-compact td {
+  padding: 8px 10px;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.oi-table-compact .time-cell {
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.oi-table-compact .oi-cell {
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.oi-table-compact .change-cell {
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.oi-table-compact .percent-cell,
+.oi-table-compact .ltp-cell {
+  font-size: 0.78rem;
+}
+
+.oi-table-compact tbody tr.latest-row {
+  border-left-width: 2px;
+}
+
+.history-section-compact .empty-state {
+  padding: 36px 16px;
+  gap: 10px;
+}
+
+.history-section-compact .empty-state svg {
+  width: 32px;
+  height: 32px;
+  opacity: 0.6;
+}
+
+.history-section-compact .empty-state p {
+  font-size: 0.75rem;
+  max-width: 280px;
+  text-align: center;
+  line-height: 1.4;
+}
+
 .empty-state {
   display: flex;
   flex-direction: column;
@@ -529,6 +665,10 @@ button:focus-visible {
   }
 
   .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .stats-grid-compact {
     grid-template-columns: 1fr;
   }
 

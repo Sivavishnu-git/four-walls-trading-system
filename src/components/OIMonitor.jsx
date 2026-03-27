@@ -80,13 +80,7 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
         ),
     );
     const [currentOI, setCurrentOI] = useState(null);
-    const [oiChange, setOiChange] = useState(null);
     const [oiTrend5Min, setOiTrend5Min] = useState(null);
-    const [lastUpdate, setLastUpdate] = useState(null);
-    const [initialOIChange, setInitialOIChange] = useState(() => {
-        const saved = localStorage.getItem("oi_initial_offset");
-        return saved ? Number(saved) : 0;
-    });
     const firstSessionOIRef = useRef(null);
     const intervalRef = useRef(null);
 
@@ -127,8 +121,6 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
             // NEW: Update "Current" stats immediately for the UI cards
             // This ensures the dashboard isn't empty while waiting for the 3-min interval
             setCurrentOI(feedData.oi);
-            setOiChange(feedData.oi - (firstSessionOIRef.current || feedData.oi));
-            setLastUpdate(new Date());
         }
     }, [liveData, instrumentKey]);
 
@@ -168,9 +160,8 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
             setOiHistory((prev) => {
                 const updated = [...prev];
 
-                // Cumulative Change = User Initial Value + (Current Market OI - Starting Session OI)
                 const relativeDiff = oi - firstSessionOIRef.current;
-                newEntry.change = Number(initialOIChange) + relativeDiff;
+                newEntry.change = relativeDiff;
 
                 if (updated.length > 0) {
                     const lastOI = updated[updated.length - 1].oi;
@@ -182,7 +173,6 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
             });
 
             setCurrentOI(oi);
-            setLastUpdate(timestamp);
         };
 
         const setupSyncTimer = () => {
@@ -221,7 +211,7 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
                 intervalRef.current = null;
             }
         };
-    }, [isLive, instrumentKey, initialOIChange]);
+    }, [isLive, instrumentKey]);
 
     // Auto-connect on mount if token is available
     useEffect(() => {
@@ -333,8 +323,6 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
             return;
         }
 
-        localStorage.setItem("oi_initial_offset", initialOIChange.toString());
-
         console.log("Connecting with instrument:", instrumentKey);
         setIsLive(true);
         connect();
@@ -352,9 +340,9 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
     };
 
     const getChangeIcon = (change) => {
-        if (change > 0) return <TrendingUp size={20} />;
-        if (change < 0) return <TrendingDown size={20} />;
-        return <Activity size={20} />;
+        if (change > 0) return <TrendingUp size={14} strokeWidth={2.25} />;
+        if (change < 0) return <TrendingDown size={14} strokeWidth={2.25} />;
+        return <Activity size={14} strokeWidth={2.25} />;
     };
 
     return (
@@ -439,33 +427,29 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
                         <LogIn size={16} strokeWidth={2.25} />
                         Login with Upstox
                     </button>
-                    {!isLive ? (
+                    {!isLive && (
                         <button type="button" onClick={handleConnect} className="connect-btn" disabled={!token}>
                             Connect
                         </button>
-                    ) : (
-                        <div style={{ fontSize: "0.8rem", color: "#888", paddingRight: "4px" }}>
-                            Base Offset: {formatNumber(initialOIChange)}
-                        </div>
                     )}
                 </div>
             </div>
 
-            {/* Stats Cards */}
-            <div className="stats-grid">
+            {/* Stats — compact tiles (4 columns) */}
+            <div className="stats-grid stats-grid-compact">
                 <div className="stat-card">
                     <div className="stat-label">Current OI</div>
-                    <div className="stat-value">{formatNumber(currentOI)}</div>
-                    <div className="stat-subtitle" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <div className="stat-value stat-value-compact">{formatNumber(currentOI)}</div>
+                    <div className="stat-subtitle stat-subtitle-compact" style={{ display: "flex", justifyContent: "space-between", gap: "8px" }}>
                         <span>Open Interest</span>
-                        <span style={{ color: '#2962ff', opacity: 0.8, fontSize: '0.7rem', fontWeight: 'bold' }}>{instrumentKey}</span>
+                        <span style={{ color: "#2962ff", opacity: 0.85, fontWeight: 600 }}>{instrumentKey}</span>
                     </div>
                 </div>
 
                 <div className="stat-card">
-                    <div className="stat-label">Daily OI Change</div>
+                    <div className="stat-label">Daily OI change</div>
                     <div
-                        className="stat-value"
+                        className="stat-value stat-value-compact"
                         style={{ color: getChangeColor(dailyOIChange) }}
                     >
                         <span className="change-icon">{getChangeIcon(dailyOIChange)}</span>
@@ -473,88 +457,52 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
                             ? formatNumber(Math.abs(dailyOIChange))
                             : "--"}
                     </div>
-                    <div className="stat-subtitle">
+                    <div className="stat-subtitle stat-subtitle-compact">
                         {dailyOIChange !== null
                             ? dailyOIChange > 0
-                                ? "Added Today"
-                                : "Unwound Today"
-                            : "Calculating..."}
-                    </div>
-                </div>
-
-                <div
-                    className="stat-card"
-                    style={{ borderColor: getChangeColor(oiChange) }}
-                >
-                    <div className="stat-label">Session OI change</div>
-                    <div
-                        className="stat-value"
-                        style={{ color: getChangeColor(oiChange) }}
-                    >
-                        <span className="change-icon">{getChangeIcon(oiChange)}</span>
-                        {oiChange !== null ? formatNumber(Math.abs(oiChange)) : "0"}
-                    </div>
-                    <div className="stat-subtitle">
-                        {oiChange !== null && oiChange !== 0
-                            ? `${oiChange > 0 ? "+" : "-"}${Math.abs(oiChange).toFixed(2)} vs first capture`
-                            : "No change vs session start"}
+                                ? "Added today"
+                                : "Unwound today"
+                            : "Calculating…"}
                     </div>
                 </div>
 
                 <div className="stat-card">
-                    <div className="stat-label">OI Trend (5 min)</div>
+                    <div className="stat-label">OI trend (5 min)</div>
                     <div
-                        className="stat-value"
+                        className="stat-value stat-value-compact stat-trend-row"
                         style={{
                             color:
                                 oiTrend5Min === "increasing"
                                     ? "#26a69a"
                                     : oiTrend5Min === "decreasing"
                                         ? "#ef5350"
-                                        : "#fff",
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "8px",
+                                        : "#e0e0e0",
                         }}
                     >
                         {oiTrend5Min === "increasing" ? (
-                            <TrendingUp size={24} />
+                            <TrendingUp size={14} strokeWidth={2.25} />
                         ) : oiTrend5Min === "decreasing" ? (
-                            <TrendingDown size={24} />
+                            <TrendingDown size={14} strokeWidth={2.25} />
                         ) : (
-                            <Activity size={24} />
+                            <Activity size={14} strokeWidth={2.25} />
                         )}
-                        <span style={{ fontSize: "1.2rem", fontWeight: "normal" }}>
+                        <span className="stat-trend-text">
                             {oiTrend5Min === "increasing"
-                                ? "INCREASING"
+                                ? "Increasing"
                                 : oiTrend5Min === "decreasing"
-                                    ? "DECREASING"
-                                    : "NEUTRAL"}
+                                    ? "Decreasing"
+                                    : "Neutral"}
                         </span>
                     </div>
-                    <div className="stat-subtitle">Based on last 5 min</div>
+                    <div className="stat-subtitle stat-subtitle-compact">Last 5 min window</div>
                 </div>
 
                 <div className="stat-card">
-                    <div className="stat-label">Last Update</div>
-                    <div className="stat-value small">
-                        {lastUpdate
-                            ? lastUpdate.toLocaleTimeString("en-IN", { hour12: false })
-                            : "--:--:--"}
-                    </div>
-                    <div className="stat-subtitle">
-                        {lastUpdate
-                            ? lastUpdate.toLocaleDateString("en-IN")
-                            : "Not Connected"}
-                    </div>
+                    <div className="stat-label">Data points</div>
+                    <div className="stat-value stat-value-compact">{oiHistory.length}</div>
+                    <div className="stat-subtitle stat-subtitle-compact">Last 5 snapshots · 3 min</div>
                 </div>
-
-                <div className="stat-card">
-                    <div className="stat-label">Data Points</div>
-                    <div className="stat-value">{oiHistory.length}</div>
-                    <div className="stat-subtitle">Last 5 snapshots (3 min)</div>
-                </div>
-            </div >
+            </div>
 
             {/* NEW: Market Trend Analysis */}
             {/* <MarketTrendAnalysis history={oiHistory} /> */}
@@ -563,8 +511,8 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
             {/* <OptionEntryPlanner /> */}
 
             {/* OI History Table */}
-            <div className="history-section">
-                <div className="section-header">
+            <div className="history-section history-section-compact">
+                <div className="section-header section-header-compact">
                     <h2>OI Change History</h2>
                     <div className="refresh-indicator">
                         <RefreshCw size={16} className={isLive ? "spinning" : ""} />
@@ -581,7 +529,7 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
                             <p>No data yet. Connect to start monitoring OI changes.</p>
                         </div>
                     ) : (
-                        <table className="oi-table">
+                        <table className="oi-table oi-table-compact">
                             <thead>
                                 <tr>
                                     <th>Time</th>
