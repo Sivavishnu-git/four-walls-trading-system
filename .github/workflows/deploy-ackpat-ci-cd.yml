@@ -1,19 +1,46 @@
-name: CD to EC2
+name: deploy-ackpat-ci-cd
 
 on:
+  pull_request:
   push:
     branches:
       - main
+      - sit-branch
+      - test-branch
   workflow_dispatch:
 
-concurrency:
-  group: cd-ec2-main
-  cancel-in-progress: true
-
 jobs:
+  lint-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Lint (non-blocking for existing lint debt)
+        continue-on-error: true
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+  # EC2 deploy: only after CI passes on main (or manual run from Actions tab)
   deploy:
+    needs: lint-build
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    concurrency:
+      group: cd-ec2-main
+      cancel-in-progress: true
     env:
       EC2_HOST: ${{ secrets.EC2_HOST }}
       EC2_USER: ${{ secrets.EC2_USER }}
