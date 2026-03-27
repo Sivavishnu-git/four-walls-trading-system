@@ -12,10 +12,73 @@ import { apiFetch } from "../api/client.js";
 // import { MarketTrendAnalysis } from './MarketTrendAnalysis';
 // import { OptionEntryPlanner } from './OptionEntryPlanner';
 
+const OI_HISTORY_STORAGE_PREFIX = "oi_change_history:";
+
+function getOiHistoryStorageKey(instrumentKey) {
+    return `${OI_HISTORY_STORAGE_PREFIX}${instrumentKey}`;
+}
+
+function serializeOiHistory(entries) {
+    return JSON.stringify(
+        entries.map((e) => ({
+            time: e.time,
+            oi: e.oi,
+            ltp: e.ltp,
+            change: e.change,
+            changePercent: e.changePercent,
+            fullTime:
+                e.fullTime instanceof Date ? e.fullTime.toISOString() : String(e.fullTime),
+        })),
+    );
+}
+
+function deserializeOiHistory(json) {
+    if (!json) return [];
+    try {
+        const raw = JSON.parse(json);
+        if (!Array.isArray(raw)) return [];
+        return raw.slice(0, 5).map((row) => ({
+            time: row.time,
+            oi: row.oi,
+            ltp: row.ltp,
+            change: row.change,
+            changePercent: row.changePercent,
+            fullTime: row.fullTime ? new Date(row.fullTime) : new Date(),
+        }));
+    } catch {
+        return [];
+    }
+}
+
+function loadOiHistoryFromStorage(instrumentKey) {
+    if (!instrumentKey) return [];
+    try {
+        return deserializeOiHistory(localStorage.getItem(getOiHistoryStorageKey(instrumentKey)));
+    } catch {
+        return [];
+    }
+}
+
+function saveOiHistoryToStorage(instrumentKey, entries) {
+    if (!instrumentKey) return;
+    try {
+        localStorage.setItem(
+            getOiHistoryStorageKey(instrumentKey),
+            serializeOiHistory(entries.slice(-5)),
+        );
+    } catch {
+        /* quota / private mode */
+    }
+}
+
 export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
     const { accessToken: token, loginWithUpstox } = useAuth();
     const [isLive, setIsLive] = useState(false);
-    const [oiHistory, setOiHistory] = useState([]);
+    const [oiHistory, setOiHistory] = useState(() =>
+        loadOiHistoryFromStorage(
+            propInstrumentKey || import.meta.env.VITE_INSTRUMENT_KEY || "NSE_FO|51714",
+        ),
+    );
     const [currentOI, setCurrentOI] = useState(null);
     const [oiChange, setOiChange] = useState(null);
     const [oiTrend5Min, setOiTrend5Min] = useState(null);
@@ -34,6 +97,14 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
     useEffect(() => {
         if (propInstrumentKey) setInstrumentKey(propInstrumentKey);
     }, [propInstrumentKey]);
+
+    useEffect(() => {
+        setOiHistory(loadOiHistoryFromStorage(instrumentKey));
+    }, [instrumentKey]);
+
+    useEffect(() => {
+        saveOiHistoryToStorage(instrumentKey, oiHistory);
+    }, [oiHistory, instrumentKey]);
 
     const {
         connect,
@@ -497,7 +568,7 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
                 <div className="stat-card">
                     <div className="stat-label">Data Points</div>
                     <div className="stat-value">{oiHistory.length}</div>
-                    <div className="stat-subtitle">Captured Intervals</div>
+                    <div className="stat-subtitle">Last 5 snapshots (3 min)</div>
                 </div>
             </div >
 
@@ -513,7 +584,9 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
                     <h2>OI Change History</h2>
                     <div className="refresh-indicator">
                         <RefreshCw size={16} className={isLive ? "spinning" : ""} />
-                        <span>Updates every 3 minutes</span>
+                        <span>
+                            Up to 5 rows, every 3 minutes — saved in this browser (survives refresh)
+                        </span>
                     </div>
                 </div>
 
@@ -536,7 +609,14 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
                             </thead>
                             <tbody>
                                 {[...oiHistory].reverse().map((entry, index) => (
-                                    <tr key={index} className={index === 0 ? "latest-row" : ""}>
+                                    <tr
+                                        key={
+                                            entry.fullTime instanceof Date
+                                                ? entry.fullTime.toISOString()
+                                                : `${entry.time}-${index}`
+                                        }
+                                        className={index === 0 ? "latest-row" : ""}
+                                    >
                                         <td className="time-cell">{entry.time}</td>
                                         <td className="oi-cell">{formatNumber(entry.oi)}</td>
                                         <td
