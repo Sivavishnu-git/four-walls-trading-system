@@ -9,4 +9,5 @@ export const API_BASE =
       ? "http://localhost:3000"
       : "";
 
+/** Opens your Node proxy → redirect to Upstox OAuth → callback issues access token → ?token= on FRONTEND_URI */
 export const AUTH_LOGIN_URL = `${API_BASE}/api/auth/login`;

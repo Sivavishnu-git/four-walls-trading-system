@@ -60,9 +60,13 @@ export function AuthProvider({ children }) {
     setAuth((prev) => ({ ...prev, oauthError: "" }));
   }, []);
 
-  const loginRedirect = useCallback(() => {
+  /**
+   * Starts Upstox OAuth in this browser tab: GET /api/auth/login → Upstox → /api/auth/callback
+   * exchanges the auth code for an access_token, then redirects here with ?token=…
+   */
+  const loginWithUpstox = useCallback(() => {
     clearOAuthError();
-    window.location.href = AUTH_LOGIN_URL;
+    window.location.assign(AUTH_LOGIN_URL);
   }, [clearOAuthError]);
 
   const value = useMemo(
@@ -70,9 +74,11 @@ export function AuthProvider({ children }) {
       accessToken,
       oauthError,
       clearOAuthError,
-      loginRedirect,
+      /** @deprecated use loginWithUpstox */
+      loginRedirect: loginWithUpstox,
+      loginWithUpstox,
     }),
-    [accessToken, oauthError, clearOAuthError, loginRedirect],
+    [accessToken, oauthError, clearOAuthError, loginWithUpstox],
   );
 
   return (

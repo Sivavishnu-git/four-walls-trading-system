@@ -13,7 +13,7 @@ import { apiFetch } from "../api/client.js";
 // import { OptionEntryPlanner } from './OptionEntryPlanner';
 
 export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
-    const { accessToken: token, loginRedirect } = useAuth();
+    const { accessToken: token, loginWithUpstox } = useAuth();
     const [isLive, setIsLive] = useState(false);
     const [oiHistory, setOiHistory] = useState([]);
     const [currentOI, setCurrentOI] = useState(null);
@@ -259,7 +259,7 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
 
     const handleConnect = async () => {
         if (!token) {
-            loginRedirect();
+            loginWithUpstox();
             return;
         }
 
@@ -372,12 +372,12 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
                 <div className="header-right" style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
                     <button
                         type="button"
-                        onClick={loginRedirect}
+                        onClick={loginWithUpstox}
                         className="login-btn"
-                        title="Sign in with Upstox (opens OAuth)"
+                        title="Upstox OAuth: opens login, then returns with access token"
                     >
                         <LogIn size={16} strokeWidth={2.25} />
-                        Login
+                        Login with Upstox
                     </button>
                     {!isLive ? (
                         <button type="button" onClick={handleConnect} className="connect-btn" disabled={!token}>

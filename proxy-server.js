@@ -113,8 +113,16 @@ app.get("/api/health", (_req, res) => {
 // In-memory map of OAuth state -> frontend origin to avoid global cross-user leakage
 const OAUTH_STATE_STORE = new Map();
 
-// 1. Redirect to Upstox Login
+// 1. Redirect browser to Upstox OAuth; after approval, /api/auth/callback exchanges ?code for access_token
+//    and redirects to FRONTEND_URI?token=<access_token>.
 app.get("/api/auth/login", (req, res) => {
+  if (!CLIENT_ID || !CLIENT_SECRET) {
+    return res.status(503).json({
+      error:
+        "Missing UPSTOX_API_KEY or UPSTOX_API_SECRET on the server. Set them in .env and restart Node.",
+    });
+  }
+
   let frontendOrigin = FRONTEND_URI;
   const referer = req.headers.referer || req.headers.origin;
   if (referer) {
