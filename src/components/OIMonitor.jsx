@@ -5,6 +5,7 @@ import {
     TrendingDown,
     Activity,
     RefreshCw,
+    LogIn,
 } from "lucide-react";
 import { useUpstoxPolling } from "../hooks/useUpstoxPolling";
 import { apiFetch } from "../api/client.js";
@@ -12,7 +13,7 @@ import { apiFetch } from "../api/client.js";
 // import { OptionEntryPlanner } from './OptionEntryPlanner';
 
 export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
-    const { accessToken: token } = useAuth();
+    const { accessToken: token, loginRedirect } = useAuth();
     const [isLive, setIsLive] = useState(false);
     const [oiHistory, setOiHistory] = useState([]);
     const [currentOI, setCurrentOI] = useState(null);
@@ -258,7 +259,7 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
 
     const handleConnect = async () => {
         if (!token) {
-            alert("Please login first to get a valid Upstox Access Token.");
+            loginRedirect();
             return;
         }
 
@@ -368,20 +369,29 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
                     )}
                 </div>
 
-                <div className="header-right">
+                <div className="header-right" style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+                    <button
+                        type="button"
+                        onClick={loginRedirect}
+                        className="login-btn"
+                        title="Sign in with Upstox (opens OAuth)"
+                    >
+                        <LogIn size={16} strokeWidth={2.25} />
+                        Login
+                    </button>
                     {!isLive ? (
-                        <button onClick={handleConnect} className="connect-btn" disabled={!token}>
+                        <button type="button" onClick={handleConnect} className="connect-btn" disabled={!token}>
                             Connect
                         </button>
                     ) : (
-                        <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-                            <div style={{ fontSize: "0.8rem", color: "#888", paddingRight: "10px" }}>
+                        <>
+                            <div style={{ fontSize: "0.8rem", color: "#888", paddingRight: "4px" }}>
                                 Base Offset: {formatNumber(initialOIChange)}
                             </div>
-                            <button onClick={handleDisconnect} className="disconnect-btn">
+                            <button type="button" onClick={handleDisconnect} className="disconnect-btn">
                                 Disconnect
                             </button>
-                        </div>
+                        </>
                     )}
                 </div>
             </div>
