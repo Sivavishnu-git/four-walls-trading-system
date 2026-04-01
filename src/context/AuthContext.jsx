@@ -69,16 +69,22 @@ export function AuthProvider({ children }) {
     window.location.assign(AUTH_LOGIN_URL);
   }, [clearOAuthError]);
 
+  const logout = useCallback(() => {
+    localStorage.removeItem(STORAGE_KEY);
+    setAuth({ accessToken: "", oauthError: "" });
+  }, []);
+
   const value = useMemo(
     () => ({
       accessToken,
       oauthError,
       clearOAuthError,
+      logout,
       /** @deprecated use loginWithUpstox */
       loginRedirect: loginWithUpstox,
       loginWithUpstox,
     }),
-    [accessToken, oauthError, clearOAuthError, loginWithUpstox],
+    [accessToken, oauthError, clearOAuthError, loginWithUpstox, logout],
   );
 
   return (

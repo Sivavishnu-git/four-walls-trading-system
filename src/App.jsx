@@ -2,8 +2,10 @@ import React, { useState, useEffect } from "react";
 import { apiFetch } from "./api/client.js";
 import { useAuth } from "./context/AuthContext.jsx";
 import { isValidAccessToken } from "./utils/authToken";
-import { Activity, LogIn, TrendingUp } from "lucide-react";
+import { LogIn, TrendingUp } from "lucide-react";
+import { AppShell } from "./components/AppShell";
 import { OIMonitor } from "./components/OIMonitor";
+import { StrategyPage } from "./components/StrategyPage";
 
 class TabErrorBoundary extends React.Component {
   state = { hasError: false, error: null };
@@ -51,12 +53,13 @@ function formatOAuthError(code) {
 }
 
 function App() {
-  const { accessToken, loginWithUpstox, oauthError, clearOAuthError } = useAuth();
+  const { accessToken, loginWithUpstox, oauthError, clearOAuthError, logout } = useAuth();
 
   const [instrumentKey, setInstrumentKey] = useState(import.meta.env.VITE_INSTRUMENT_KEY || "");
   const [instrumentSymbol, setInstrumentSymbol] = useState("");
   const [niftyFutLtp, setNiftyFutLtp] = useState(null);
   const [niftyFutChange, setNiftyFutChange] = useState(null);
+  const [appView, setAppView] = useState("oi");
 
   useEffect(() => {
     apiFetch("/api/tools/discover-nifty-future")
@@ -248,85 +251,23 @@ function App() {
   }
 
   return (
-    <div
-      className="App"
-      style={{
-        minHeight: "100vh",
-        height: "auto",
-        width: "100%",
-        maxWidth: "100vw",
-        display: "flex",
-        flexDirection: "column",
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          background: "#131722",
-          borderBottom: "2px solid #2a2e39",
-          padding: "0 16px",
-          flexWrap: "wrap",
-          gap: "8px",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <Activity size={20} color="#26a69a" strokeWidth={2} />
-          <div>
-            <div style={{ fontWeight: 700, color: "#fff", fontSize: "0.95rem" }}>OI Monitor</div>
-            <div style={{ fontSize: "0.7rem", color: "#888" }}>Four Walls Trading</div>
-          </div>
-        </div>
-
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          {instrumentSymbol && (
-            <span style={{ color: "#26a69a", fontSize: "0.8rem", fontWeight: 600 }}>{instrumentSymbol}</span>
-          )}
-          {niftyFutLtp != null && (
-            <span
-              title="NIFTY future last traded price (LTP)"
-              style={{
-                display: "flex",
-                alignItems: "baseline",
-                gap: "8px",
-                fontFamily: "ui-monospace, monospace",
-                fontSize: "1.05rem",
-                fontWeight: 700,
-                color: "#fff",
-              }}
-            >
-              <span style={{ color: "#888", fontSize: "0.7rem", fontWeight: 600 }}>LTP</span>
-              {niftyFutLtp.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              {niftyFutChange != null && (
-                <span
-                  style={{
-                    fontSize: "0.85rem",
-                    fontWeight: 600,
-                    color: niftyFutChange >= 0 ? "#26a69a" : "#ef5350",
-                  }}
-                >
-                  {niftyFutChange >= 0 ? "+" : ""}
-                  {niftyFutChange.toFixed(2)}
-                </span>
-              )}
-            </span>
-          )}
-        </div>
-      </div>
-
-      <div
-        style={{
-          flex: "1 1 auto",
-          minHeight: "calc(100vh - 52px)",
-          overflow: "visible",
-          position: "relative",
-        }}
+    <div className="App app-root">
+      <AppShell
+        activeView={appView}
+        onNavigate={setAppView}
+        instrumentSymbol={instrumentSymbol}
+        niftyFutLtp={niftyFutLtp}
+        niftyFutChange={niftyFutChange}
+        onLogout={logout}
       >
         <TabErrorBoundary>
-          <OIMonitor instrumentKey={instrumentKey} />
+          {appView === "strategy" ? (
+            <StrategyPage />
+          ) : (
+            <OIMonitor instrumentKey={instrumentKey} />
+          )}
         </TabErrorBoundary>
-      </div>
+      </AppShell>
     </div>
   );
 }
