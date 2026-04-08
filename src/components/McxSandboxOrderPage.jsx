@@ -20,6 +20,9 @@ export function McxSandboxOrderPage({ accessToken }) {
   const [ladder, setLadder] = useState(null);
   const [placingSlot, setPlacingSlot] = useState("");
   const [status, setStatus] = useState({ kind: "", text: "" });
+  const [publicIp, setPublicIp] = useState("");
+  const [logs, setLogs] = useState([]);
+  const [logStats, setLogStats] = useState({ total: 0, success: 0, failed: 0 });
 
   const loadLadder = async () => {
     setLoading(true);
@@ -45,6 +48,43 @@ export function McxSandboxOrderPage({ accessToken }) {
     loadLadder();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [optionType]);
+
+  const loadPublicIp = async () => {
+    try {
+      const res = await apiFetch("/api/tools/public-ip");
+      const json = await res.json();
+      if (res.ok && json?.status === "success" && json?.data?.public_ip) {
+        setPublicIp(String(json.data.public_ip));
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const loadLogs = async () => {
+    try {
+      const res = await apiFetch("/api/sandbox/order/logs", { accessToken });
+      const json = await res.json();
+      if (!res.ok || json?.status !== "success") return;
+      const data = json.data || {};
+      setLogs(Array.isArray(data.logs) ? data.logs : []);
+      setLogStats({
+        total: Number(data.total || 0),
+        success: Number(data.success || 0),
+        failed: Number(data.failed || 0),
+      });
+    } catch {
+      // keep UI usable even if logs endpoint fails
+    }
+  };
+
+  useEffect(() => {
+    loadLogs();
+    loadPublicIp();
+    const id = setInterval(loadLogs, 5000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const slots = useMemo(() => ladder?.slots || {}, [ladder]);
 
@@ -73,8 +113,16 @@ export function McxSandboxOrderPage({ accessToken }) {
       try { json = text ? JSON.parse(text) : null; } catch { json = text || null; }
       if (!res.ok) throw new Error(extractReason(json, `Order failed (HTTP ${res.status})`));
       setStatus({ kind: "success", text: `${slotName} BUY placed for ${slot.trading_symbol}` });
+      loadLogs();
     } catch (e) {
-      setStatus({ kind: "error", text: e.message || "Order failed" });
+      const msg = e.message || "Order failed";
+      if (msg.toLowerCase().includes("static ip") || msg.toLowerCase().includes("ip restriction")) {
+        const ipHint = publicIp ? ` Whitelist this server IP in broker app: ${publicIp}` : "";
+        setStatus({ kind: "error", text: `Static IP restriction from broker.${ipHint}` });
+      } else {
+        setStatus({ kind: "error", text: msg });
+      }
+      loadLogs();
     } finally {
       setPlacingSlot("");
     }
@@ -103,6 +151,8 @@ export function McxSandboxOrderPage({ accessToken }) {
         <span>Default base: {DEFAULT_BASE_KEY}</span>
         {ladder?.base?.ltp ? <span>Spot: {Number(ladder.base.ltp).toFixed(2)}</span> : null}
         {ladder?.atm_strike ? <span>ATM: {ladder.atm_strike}</span> : null}
+        <span>Tracked: {logStats.total} (OK {logStats.success} / Fail {logStats.failed})</span>
+        {publicIp ? <span>Server IP: {publicIp}</span> : null}
       </div>
 
       {status.text ? (
@@ -148,6 +198,43 @@ export function McxSandboxOrderPage({ accessToken }) {
             </div>
           );
         })}
+      </div>
+
+      <div className="mcx-log-wrap">
+        <div className="mcx-log-head">
+          <h3>Recent Sandbox MCX Orders</h3>
+          <button type="button" onClick={loadLogs}>Refresh Logs</button>
+        </div>
+        <table className="mcx-log-table">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Status</th>
+              <th>Instrument</th>
+              <th>Intent</th>
+              <th>Qty</th>
+              <th>Reason / Response</th>
+            </tr>
+          </thead>
+          <tbody>
+            {logs.length === 0 ? (
+              <tr><td colSpan={6}>No sandbox orders tracked yet.</td></tr>
+            ) : logs.map((row, idx) => (
+              <tr key={`${row.ts}-${idx}`}>
+                <td>{new Date(row.ts).toLocaleTimeString("en-IN")}</td>
+                <td style={{ color: row.ok ? "#26a69a" : "#ef5350", fontWeight: 700 }}>{row.ok ? "OK" : "FAIL"}</td>
+                <td>{row.instrument_token || "--"}</td>
+                <td>{row.trading_intent || "--"}</td>
+                <td>{row.quantity ?? "--"}</td>
+                <td className="mcx-log-msg">
+                  {row.ok
+                    ? (row.response?.data?.order_ids?.join(", ") || row.response?.data?.order_id || "Placed")
+                    : extractReason(row.error, "Rejected")}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );

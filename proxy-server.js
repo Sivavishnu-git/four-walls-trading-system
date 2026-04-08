@@ -103,6 +103,7 @@ const FALLBACK_ACCESS_TOKEN = process.env.UPSTOX_ACCESS_TOKEN
     : `Bearer ${process.env.UPSTOX_ACCESS_TOKEN}`)
   : "";
 const DEFAULT_MCX_BASE_KEY = "MCX_FO|554671";
+const MCX_SANDBOX_ORDER_LOGS = [];
 
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
@@ -112,6 +113,16 @@ app.use((req, res, next) => {
 /** No external deps — use to verify Node is up (ALB/nginx can still use GET / on port 80). */
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", service: "livetrading-proxy" });
+});
+
+// Useful for broker IP-whitelisting issues (static IP restrictions).
+app.get("/api/tools/public-ip", async (_req, res) => {
+  try {
+    const ipRes = await axios.get("https://api.ipify.org?format=json", { timeout: 8000 });
+    res.json({ status: "success", data: { public_ip: ipRes.data?.ip || null } });
+  } catch (e) {
+    res.status(500).json({ error: e.response?.data || e.message || "Failed to fetch public IP" });
+  }
 });
 
 // --- SIMPLE ORDER BOT (in-memory; reset on process restart) ---
@@ -1244,11 +1255,46 @@ app.post("/api/sandbox/order/place", async (req, res) => {
         "Content-Type": "application/json",
       },
     });
+    MCX_SANDBOX_ORDER_LOGS.push({
+      ts: new Date().toISOString(),
+      ok: true,
+      instrument_token,
+      trading_intent: `${payload.transaction_type} ${payload.order_type} ${payload.product}`,
+      quantity: payload.quantity,
+      tag: payload.tag || null,
+      response: response.data,
+    });
+    if (MCX_SANDBOX_ORDER_LOGS.length > 300) MCX_SANDBOX_ORDER_LOGS.splice(0, MCX_SANDBOX_ORDER_LOGS.length - 300);
     res.json(response.data);
   } catch (error) {
     const errorData = error.response ? error.response.data : { error: error.message };
+    MCX_SANDBOX_ORDER_LOGS.push({
+      ts: new Date().toISOString(),
+      ok: false,
+      instrument_token: String(req.body?.instrument_token || ""),
+      trading_intent: `${String(req.body?.transaction_type || "BUY")} ${String(req.body?.order_type || "MARKET")} ${String(req.body?.product || "I")}`,
+      quantity: Number(req.body?.quantity || 1),
+      tag: req.body?.tag ? String(req.body.tag) : null,
+      error: errorData,
+    });
+    if (MCX_SANDBOX_ORDER_LOGS.length > 300) MCX_SANDBOX_ORDER_LOGS.splice(0, MCX_SANDBOX_ORDER_LOGS.length - 300);
     res.status(error.response?.status || 500).json(errorData);
   }
+});
+
+app.get("/api/sandbox/order/logs", (_req, res) => {
+  const logs = [...MCX_SANDBOX_ORDER_LOGS].reverse().slice(0, 120);
+  const okCount = logs.filter((x) => x.ok).length;
+  const failCount = logs.length - okCount;
+  res.json({
+    status: "success",
+    data: {
+      total: logs.length,
+      success: okCount,
+      failed: failCount,
+      logs,
+    },
+  });
 });
 
 // Option Chain Endpoint

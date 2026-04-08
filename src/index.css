@@ -237,6 +237,56 @@ select:focus {
   cursor: not-allowed;
 }
 
+.mcx-log-wrap {
+  margin-top: 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(7, 10, 16, 0.35);
+  overflow: hidden;
+}
+
+.mcx-log-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.mcx-log-head h3 {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #dbe3ff;
+}
+
+.mcx-log-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.mcx-log-table th,
+.mcx-log-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  font-size: 0.75rem;
+  text-align: left;
+}
+
+.mcx-log-table th {
+  color: #97abda;
+  font-size: 0.67rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.mcx-log-msg {
+  max-width: 400px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ===== Order Analysis ===== */
 .analysis-page {
   min-height: calc(100vh - 52px);
