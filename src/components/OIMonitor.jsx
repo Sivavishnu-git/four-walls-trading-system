@@ -13,6 +13,8 @@ import { apiFetch } from "../api/client.js";
 // import { OptionEntryPlanner } from './OptionEntryPlanner';
 
 const OI_HISTORY_STORAGE_PREFIX = "oi_change_history:";
+/** Max 3‑minute snapshots kept in memory + localStorage (200 ≈ 10 hours). */
+const OI_HISTORY_MAX_ROWS = 200;
 
 function getOiHistoryStorageKey(instrumentKey) {
     return `${OI_HISTORY_STORAGE_PREFIX}${instrumentKey}`;
@@ -37,7 +39,7 @@ function deserializeOiHistory(json) {
     try {
         const raw = JSON.parse(json);
         if (!Array.isArray(raw)) return [];
-        return raw.slice(0, 5).map((row) => ({
+        return raw.slice(0, OI_HISTORY_MAX_ROWS).map((row) => ({
             time: row.time,
             oi: row.oi,
             ltp: row.ltp,
@@ -64,7 +66,7 @@ function saveOiHistoryToStorage(instrumentKey, entries) {
     try {
         localStorage.setItem(
             getOiHistoryStorageKey(instrumentKey),
-            serializeOiHistory(entries.slice(-5)),
+            serializeOiHistory(entries.slice(-OI_HISTORY_MAX_ROWS)),
         );
     } catch {
         /* quota / private mode */
@@ -169,7 +171,7 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
                         lastOI !== 0 ? ((oi - lastOI) / lastOI) * 100 : 0;
                 }
                 updated.push(newEntry);
-                return updated.slice(-5);
+                return updated.slice(-OI_HISTORY_MAX_ROWS);
             });
 
             setCurrentOI(oi);
@@ -500,7 +502,9 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
                 <div className="stat-card">
                     <div className="stat-label">Data points</div>
                     <div className="stat-value stat-value-compact">{oiHistory.length}</div>
-                    <div className="stat-subtitle stat-subtitle-compact">Last 5 snapshots · 3 min</div>
+                    <div className="stat-subtitle stat-subtitle-compact">
+                        Up to {OI_HISTORY_MAX_ROWS} snaps · 3 min cadence
+                    </div>
                 </div>
             </div>
 
@@ -517,7 +521,8 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
                     <div className="refresh-indicator">
                         <RefreshCw size={16} className={isLive ? "spinning" : ""} />
                         <span>
-                            Up to 5 rows, every 3 minutes — saved in this browser (survives refresh)
+                            Up to {OI_HISTORY_MAX_ROWS} rows, every 3 minutes — saved in this browser
+                            (survives refresh)
                         </span>
                     </div>
                 </div>

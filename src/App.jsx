@@ -4,6 +4,7 @@ import { useAuth } from "./context/AuthContext.jsx";
 import { isValidAccessToken } from "./utils/authToken";
 import { Activity, LogIn, TrendingUp } from "lucide-react";
 import { OIMonitor } from "./components/OIMonitor";
+import { OrderPlacementPanel } from "./components/OrderPlacementPanel";
 
 class TabErrorBoundary extends React.Component {
   state = { hasError: false, error: null };
@@ -323,6 +324,7 @@ function App() {
           position: "relative",
         }}
       >
+        <OrderPlacementPanel instrumentKey={instrumentKey} accessToken={accessToken} />
         <TabErrorBoundary>
           <OIMonitor instrumentKey={instrumentKey} />
         </TabErrorBoundary>

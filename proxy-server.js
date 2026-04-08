@@ -97,6 +97,11 @@ const IS_PROD = process.env.NODE_ENV === "production";
 const FRONTEND_URI = IS_PROD
   ? (process.env.FRONTEND_URI || `http://localhost:${PORT}`)
   : (process.env.FRONTEND_URI || "http://localhost:5173");
+const FALLBACK_ACCESS_TOKEN = process.env.UPSTOX_ACCESS_TOKEN
+  ? (process.env.UPSTOX_ACCESS_TOKEN.startsWith("Bearer ")
+    ? process.env.UPSTOX_ACCESS_TOKEN
+    : `Bearer ${process.env.UPSTOX_ACCESS_TOKEN}`)
+  : "";
 
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
@@ -106,6 +111,195 @@ app.use((req, res, next) => {
 /** No external deps — use to verify Node is up (ALB/nginx can still use GET / on port 80). */
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", service: "livetrading-proxy" });
+});
+
+// --- SIMPLE ORDER BOT (in-memory; reset on process restart) ---
+const ORDER_BOTS = new Map();
+
+function normalizeAuthHeader(headerValue) {
+  if (!headerValue || typeof headerValue !== "string") return "";
+  return headerValue.startsWith("Bearer ") ? headerValue : `Bearer ${headerValue}`;
+}
+
+function buildOrderPayload(raw) {
+  return {
+    instrument_token: String(raw.instrument_token || "").trim(),
+    quantity: Number(raw.quantity),
+    product: String(raw.product || "I").toUpperCase(),
+    validity: String(raw.validity || "DAY").toUpperCase(),
+    price: Number(raw.price || 0),
+    order_type: String(raw.order_type || "MARKET").toUpperCase(),
+    transaction_type: String(raw.transaction_type || "BUY").toUpperCase(),
+    disclosed_quantity: Number(raw.disclosed_quantity || 0),
+    trigger_price: Number(raw.trigger_price || 0),
+    is_amo: Boolean(raw.is_amo || false),
+    tag: raw.tag ? String(raw.tag).slice(0, 20) : undefined,
+  };
+}
+
+function validateOrderPayload(payload) {
+  if (!payload.instrument_token) return "instrument_token is required";
+  if (!Number.isFinite(payload.quantity) || payload.quantity <= 0) return "quantity must be > 0";
+  if (!["I", "D", "MTF"].includes(payload.product)) return "product must be I, D, or MTF";
+  if (!["DAY", "IOC"].includes(payload.validity)) return "validity must be DAY or IOC";
+  if (!["MARKET", "LIMIT", "SL", "SL-M"].includes(payload.order_type)) return "invalid order_type";
+  if (!["BUY", "SELL"].includes(payload.transaction_type)) return "transaction_type must be BUY or SELL";
+  return "";
+}
+
+app.post("/api/bot/order/start", async (req, res) => {
+  try {
+    const authHeader = normalizeAuthHeader(req.headers.authorization);
+    const {
+      bot_id,
+      interval_sec = 180,
+      max_orders = 20,
+      dry_run = true,
+      ...rawOrder
+    } = req.body || {};
+
+    const orderPayload = buildOrderPayload(rawOrder);
+    const err = validateOrderPayload(orderPayload);
+    if (err) return res.status(400).json({ error: err });
+
+    if (!dry_run && !authHeader) {
+      return res.status(400).json({ error: "Authorization header required when dry_run=false" });
+    }
+
+    const intervalMs = Math.max(15, Number(interval_sec)) * 1000;
+    const maxOrders = Math.max(1, Number(max_orders));
+    const botId = (bot_id && String(bot_id).trim()) || `bot_${Date.now()}`;
+
+    if (ORDER_BOTS.has(botId)) {
+      return res.status(409).json({ error: `bot_id already running: ${botId}` });
+    }
+
+    const state = {
+      bot_id: botId,
+      dry_run: Boolean(dry_run),
+      interval_sec: intervalMs / 1000,
+      max_orders: maxOrders,
+      order_payload: orderPayload,
+      started_at: new Date().toISOString(),
+      next_run_at: new Date(Date.now() + intervalMs).toISOString(),
+      runs: 0,
+      success: 0,
+      failed: 0,
+      last_result: null,
+      logs: [],
+      timer: null,
+    };
+
+    const runOnce = async () => {
+      state.runs += 1;
+      state.next_run_at = new Date(Date.now() + intervalMs).toISOString();
+      try {
+        let result;
+        if (state.dry_run) {
+          result = {
+            status: "dry_run",
+            message: "No live order sent",
+            payload: state.order_payload,
+            simulated_at: new Date().toISOString(),
+          };
+        } else {
+          const upstoxRes = await axios.post(
+            "https://api.upstox.com/v2/order/place",
+            state.order_payload,
+            {
+              headers: {
+                Authorization: authHeader,
+                Accept: "application/json",
+                "Content-Type": "application/json",
+              },
+            },
+          );
+          result = upstoxRes.data;
+        }
+        state.success += 1;
+        state.last_result = result;
+        state.logs.push({ ts: new Date().toISOString(), ok: true, result });
+      } catch (e) {
+        state.failed += 1;
+        const errorData = e.response?.data || e.message;
+        state.last_result = { error: errorData };
+        state.logs.push({ ts: new Date().toISOString(), ok: false, error: errorData });
+      }
+
+      if (state.logs.length > 50) state.logs = state.logs.slice(-50);
+      if (state.runs >= state.max_orders) {
+        clearInterval(state.timer);
+        state.timer = null;
+      }
+    };
+
+    // Fire once immediately, then continue on interval
+    await runOnce();
+    if (state.runs < state.max_orders) {
+      state.timer = setInterval(runOnce, intervalMs);
+    }
+    ORDER_BOTS.set(botId, state);
+
+    res.json({
+      status: "started",
+      bot_id: botId,
+      dry_run: state.dry_run,
+      interval_sec: state.interval_sec,
+      max_orders: state.max_orders,
+      first_run_result: state.last_result,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message || "Failed to start order bot" });
+  }
+});
+
+app.get("/api/bot/order/list", (_req, res) => {
+  const bots = Array.from(ORDER_BOTS.values()).map((b) => ({
+    bot_id: b.bot_id,
+    dry_run: b.dry_run,
+    started_at: b.started_at,
+    interval_sec: b.interval_sec,
+    max_orders: b.max_orders,
+    runs: b.runs,
+    success: b.success,
+    failed: b.failed,
+    running: Boolean(b.timer),
+    next_run_at: b.next_run_at,
+  }));
+  res.json({ status: "success", bots });
+});
+
+app.get("/api/bot/order/:botId/status", (req, res) => {
+  const bot = ORDER_BOTS.get(req.params.botId);
+  if (!bot) return res.status(404).json({ error: "bot not found" });
+  res.json({
+    status: "success",
+    bot: {
+      bot_id: bot.bot_id,
+      dry_run: bot.dry_run,
+      started_at: bot.started_at,
+      interval_sec: bot.interval_sec,
+      max_orders: bot.max_orders,
+      runs: bot.runs,
+      success: bot.success,
+      failed: bot.failed,
+      running: Boolean(bot.timer),
+      next_run_at: bot.next_run_at,
+      order_payload: bot.order_payload,
+      last_result: bot.last_result,
+      logs: bot.logs,
+    },
+  });
+});
+
+app.post("/api/bot/order/:botId/stop", (req, res) => {
+  const bot = ORDER_BOTS.get(req.params.botId);
+  if (!bot) return res.status(404).json({ error: "bot not found" });
+  if (bot.timer) {
+    clearInterval(bot.timer);
+    bot.timer = null;
+  }
+  res.json({ status: "stopped", bot_id: bot.bot_id, runs: bot.runs });
 });
 
 // --- AUTH ENDPOINTS ---
@@ -393,10 +587,12 @@ app.get("/api/quotes", async (req, res) => {
 // Proxy Endpoint for Placing Orders
 app.post("/api/order/place", async (req, res) => {
   try {
-    const accessToken = req.headers.authorization;
+    const accessToken = req.headers.authorization || FALLBACK_ACCESS_TOKEN;
 
     if (!accessToken) {
-      return res.status(400).json({ error: "Missing Authorization Header" });
+      return res.status(400).json({
+        error: "Missing Authorization Header and UPSTOX_ACCESS_TOKEN not configured on server",
+      });
     }
 
     const orderData = req.body;

@@ -2,6 +2,8 @@
 
 Real-time **Nifty futures OI monitor** using the **Upstox** API. React SPA + Express proxy (`proxy-server.js`).
 
+**Technical documentation:** [docs/PROJECT.md](docs/PROJECT.md) (architecture, env vars, OI history, API, deploy).
+
 ## Features
 
 - OI monitor (primary UI)
@@ -46,10 +48,10 @@ Then open `http://localhost:3000` (or your configured host).
 
 ```
 ├── src/                 # React app (Vite)
+├── docs/                # Project documentation (see PROJECT.md)
 ├── proxy-server.js      # Express: OAuth, Upstox proxies, static dist in production
 ├── utils/tokenManager.js # Optional .env token write after OAuth (server)
-├── deploy/              # CloudFormation, nginx, ALB, runbooks, CI helpers
-└── doc/                 # Helper scripts referenced by deploy docs
+└── deploy/              # CloudFormation, nginx, PM2, ALB
 ```
 
 ## npm scripts
@@ -89,7 +91,7 @@ Then open `http://localhost:3000` (or your configured host).
 
 ## Deployment on AWS
 
-See `deploy/cloudformation.yaml`, `deploy/deploy-live.ps1`, `deploy/deploy-alb-https.ps1`, and `.github/workflows/cd-ec2.yml`. Operational notes: `deploy/CLOUD_INCIDENT_RUNBOOK.md`, `deploy/CLOUDFLARE_TUNNEL.md`, `deploy/ROUTE53.md`.
+See `deploy/cloudformation.yaml`, `deploy/cloudformation-alb-https.yaml`, `deploy/nginx.conf`, `deploy/ecosystem.config.cjs`, and **`.github/workflows/deploy-ackpat-ci-cd.yml`** (CI + EC2 deploy on `main`).
 
 ## Troubleshooting
 
