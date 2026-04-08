@@ -1,6 +1,21 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../api/client.js";
 
+function extractErrorReason(json, fallback = "Order placement failed") {
+  if (!json) return fallback;
+  if (typeof json === "string" && json.trim()) return json;
+  if (json.error && typeof json.error === "string") return json.error;
+  if (json.message && typeof json.message === "string") return json.message;
+  if (Array.isArray(json.errors) && json.errors.length > 0) {
+    const first = json.errors[0];
+    if (typeof first === "string") return first;
+    if (first && typeof first.message === "string") return first.message;
+    if (first && typeof first.error_code === "string") return first.error_code;
+  }
+  if (json.data && typeof json.data.error === "string") return json.data.error;
+  return fallback;
+}
+
 export function OrderPlacementPanel({ instrumentKey, accessToken }) {
   const [form, setForm] = useState({
     instrument_token: instrumentKey || "",
@@ -102,9 +117,16 @@ export function OrderPlacementPanel({ instrumentKey, accessToken }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const json = await res.json();
+      const text = await res.text();
+      let json = null;
+      try {
+        json = text ? JSON.parse(text) : null;
+      } catch {
+        json = text || null;
+      }
       if (!res.ok) {
-        throw new Error(json?.error || json?.message || "Order placement failed");
+        const reason = extractErrorReason(json, `Order placement failed (HTTP ${res.status})`);
+        throw new Error(reason);
       }
       setResult(json);
     } catch (e) {
