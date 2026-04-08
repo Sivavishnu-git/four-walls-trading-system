@@ -984,8 +984,12 @@ app.get("/api/portfolio/positions", async (req, res) => {
 // ATM Options for Order Placement
 app.get("/api/atm-options", async (req, res) => {
   try {
-    const accessToken = req.headers.authorization;
-    if (!accessToken) return res.status(400).json({ error: "Missing Authorization Header" });
+    const accessToken = req.headers.authorization || FALLBACK_ACCESS_TOKEN;
+    if (!accessToken) {
+      return res.status(400).json({
+        error: "Missing Authorization Header and UPSTOX_ACCESS_TOKEN not configured on server",
+      });
+    }
 
     const instruments = await getMasterData("NFO");
     if (!instruments) return res.status(500).json({ error: "Could not load master list" });

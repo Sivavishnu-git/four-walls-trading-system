@@ -18,6 +18,9 @@ export function OrderPlacementPanel({ instrumentKey, accessToken }) {
   const [placing, setPlacing] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
+  const [atmInfo, setAtmInfo] = useState(null);
+  const [atmType, setAtmType] = useState("CE");
+  const [loadingAtm, setLoadingAtm] = useState(false);
 
   useEffect(() => {
     if (!instrumentKey) return;
@@ -27,6 +30,52 @@ export function OrderPlacementPanel({ instrumentKey, accessToken }) {
   const onChange = (key, value) => {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
+
+  const loadAtm = async () => {
+    setLoadingAtm(true);
+    setError("");
+    try {
+      const res = await apiFetch("/api/atm-options", { accessToken });
+      const json = await res.json();
+      if (!res.ok || json?.status !== "success") {
+        throw new Error(json?.error || "Failed to fetch ATM options");
+      }
+      setAtmInfo(json.data);
+      const atmStrike = json.data?.atm_strike;
+      const options = Array.isArray(json.data?.options) ? json.data.options : [];
+      const preferred = options.find((o) => o.strike === atmStrike && o.type === atmType);
+      const fallback = options.find((o) => o.strike === atmStrike) || options[0];
+      const selected = preferred || fallback;
+      if (selected?.instrument_key) {
+        setForm((prev) => ({
+          ...prev,
+          instrument_token: selected.instrument_key,
+          quantity: String(selected.lot_size || prev.quantity || "1"),
+        }));
+      }
+    } catch (e) {
+      setError(e.message || "Failed to fetch ATM options");
+    } finally {
+      setLoadingAtm(false);
+    }
+  };
+
+  useEffect(() => {
+    loadAtm();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!atmInfo?.options?.length) return;
+    const atmStrike = atmInfo.atm_strike;
+    const selected = atmInfo.options.find((o) => o.strike === atmStrike && o.type === atmType);
+    if (!selected?.instrument_key) return;
+    setForm((prev) => ({
+      ...prev,
+      instrument_token: selected.instrument_key,
+      quantity: String(selected.lot_size || prev.quantity || "1"),
+    }));
+  }, [atmType, atmInfo]);
 
   const placeOrder = async () => {
     setPlacing(true);
@@ -79,6 +128,20 @@ export function OrderPlacementPanel({ instrumentKey, accessToken }) {
       }}
     >
       <div style={{ color: "#fff", fontSize: "0.92rem", fontWeight: 700 }}>Quick Order Placement</div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <button type="button" onClick={loadAtm} disabled={loadingAtm}>
+          {loadingAtm ? "Finding ATM..." : "Use Nifty ATM"}
+        </button>
+        <select value={atmType} onChange={(e) => setAtmType(e.target.value)}>
+          <option value="CE">ATM CE</option>
+          <option value="PE">ATM PE</option>
+        </select>
+        {atmInfo?.atm_strike ? (
+          <span style={{ color: "#b0b3c0", fontSize: "0.8rem" }}>
+            Spot {Number(atmInfo.spot_price || 0).toFixed(2)} | ATM {atmInfo.atm_strike}
+          </span>
+        ) : null}
+      </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 8 }}>
         <input value={form.instrument_token} onChange={(e) => onChange("instrument_token", e.target.value)} placeholder="Instrument token" />
         <input value={form.quantity} onChange={(e) => onChange("quantity", e.target.value.replace(/[^\d]/g, ""))} placeholder="Qty" />
