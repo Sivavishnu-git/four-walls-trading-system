@@ -237,6 +237,194 @@ select:focus {
   cursor: not-allowed;
 }
 
+/* ===== Order Analysis ===== */
+.analysis-page {
+  min-height: calc(100vh - 52px);
+  padding: 24px 24px 36px;
+  background:
+    radial-gradient(900px 300px at 10% -5%, rgba(41, 98, 255, 0.18), transparent 55%),
+    radial-gradient(700px 280px at 90% 0%, rgba(38, 166, 154, 0.14), transparent 50%),
+    linear-gradient(150deg, #101722 0%, #1a2231 50%, #242f45 100%);
+}
+
+.analysis-hero {
+  padding: 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: linear-gradient(140deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03));
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.32);
+}
+
+.analysis-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.analysis-header h2 {
+  margin: 0;
+  font-size: 1.25rem;
+  letter-spacing: 0.01em;
+}
+
+.analysis-header p {
+  margin: 4px 0 0;
+  color: #aab3c8;
+  font-size: 0.82rem;
+}
+
+.analysis-strip {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.analysis-strip-item {
+  border-radius: 10px;
+  padding: 9px 10px;
+  background: rgba(8, 12, 19, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.analysis-strip-item span {
+  color: #98a4c2;
+  font-size: 0.7rem;
+}
+
+.analysis-strip-item strong {
+  color: #e9edff;
+  font-size: 0.83rem;
+}
+
+.analysis-error {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: #ffbcbc;
+  background: rgba(239, 83, 80, 0.15);
+  border: 1px solid rgba(239, 83, 80, 0.35);
+  font-size: 0.8rem;
+}
+
+.analysis-grid {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.analysis-card {
+  border-radius: 10px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.03));
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.analysis-card span {
+  color: #aab3c8;
+  font-size: 0.74rem;
+}
+
+.analysis-card strong {
+  color: #fff;
+  font-size: 0.96rem;
+}
+
+.analysis-value-up {
+  color: #7ef5da !important;
+}
+
+.analysis-value-down {
+  color: #ffb3b3 !important;
+}
+
+.analysis-progress-wrap {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.analysis-progress-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 0.78rem;
+}
+
+.analysis-progress-label span {
+  color: #aab3c8;
+}
+
+.analysis-progress-label strong {
+  color: #e8ecfb;
+  font-size: 0.78rem;
+}
+
+.analysis-progress-bar {
+  height: 10px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.analysis-progress-win {
+  height: 100%;
+  background: linear-gradient(90deg, #1e8f7f 0%, #4ee1bf 100%);
+  box-shadow: 0 0 20px rgba(38, 166, 154, 0.5);
+}
+
+.analysis-table-wrap {
+  margin-top: 14px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.26);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+}
+
+.analysis-table-wrap h3 {
+  margin: 0;
+  padding: 11px 12px;
+  font-size: 0.85rem;
+  color: #d4d9e8;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.analysis-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.analysis-table th,
+.analysis-table td {
+  padding: 9px 10px;
+  font-size: 0.78rem;
+  text-align: left;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.analysis-table th {
+  color: #8fa3cf;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
 /* ===== OI Monitor Styles ===== */
 .oi-monitor-container {
   width: 100%;

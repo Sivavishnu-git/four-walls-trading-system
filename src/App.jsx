@@ -6,6 +6,7 @@ import { Activity, LogIn, TrendingUp } from "lucide-react";
 import { OIMonitor } from "./components/OIMonitor";
 import { OrderPlacementPanel } from "./components/OrderPlacementPanel";
 import { McxSandboxOrderPage } from "./components/McxSandboxOrderPage";
+import { OrderAnalysisPage } from "./components/OrderAnalysisPage";
 
 class TabErrorBoundary extends React.Component {
   state = { hasError: false, error: null };
@@ -305,6 +306,18 @@ function App() {
             >
               MCX Sandbox
             </button>
+            <button
+              type="button"
+              onClick={() => setActivePage("analysis")}
+              style={{
+                padding: "6px 10px",
+                fontSize: "0.72rem",
+                background: activePage === "analysis" ? "rgba(255,193,7,0.22)" : "rgba(255,255,255,0.08)",
+                border: activePage === "analysis" ? "1px solid rgba(255,193,7,0.45)" : "1px solid rgba(255,255,255,0.16)",
+              }}
+            >
+              Order Analysis
+            </button>
           </div>
         </div>
 
@@ -355,6 +368,10 @@ function App() {
         {activePage === "mcx" ? (
           <TabErrorBoundary>
             <McxSandboxOrderPage accessToken={accessToken} />
+          </TabErrorBoundary>
+        ) : activePage === "analysis" ? (
+          <TabErrorBoundary>
+            <OrderAnalysisPage accessToken={accessToken} />
           </TabErrorBoundary>
         ) : (
           <>
