@@ -1,0 +1,154 @@
+import { useEffect, useMemo, useState } from "react";
+import { apiFetch } from "../api/client.js";
+
+const DEFAULT_BASE_KEY = "MCX_FO|554671";
+const SLOT_ORDER = ["ATM", "ITM1", "ITM2", "ITM3", "OTM1"];
+
+function extractReason(json, fallback = "Order failed") {
+  if (!json) return fallback;
+  if (typeof json === "string" && json.trim()) return json;
+  if (json.error && typeof json.error === "string") return json.error;
+  if (json.message && typeof json.message === "string") return json.message;
+  if (Array.isArray(json.errors) && json.errors[0]?.message) return json.errors[0].message;
+  return fallback;
+}
+
+export function McxSandboxOrderPage({ accessToken }) {
+  const [optionType, setOptionType] = useState("CE");
+  const [baseKey, setBaseKey] = useState(DEFAULT_BASE_KEY);
+  const [loading, setLoading] = useState(false);
+  const [ladder, setLadder] = useState(null);
+  const [placingSlot, setPlacingSlot] = useState("");
+  const [status, setStatus] = useState({ kind: "", text: "" });
+
+  const loadLadder = async () => {
+    setLoading(true);
+    setStatus({ kind: "", text: "" });
+    try {
+      const qs = new URLSearchParams({
+        base_instrument_key: baseKey.trim() || DEFAULT_BASE_KEY,
+        option_type: optionType,
+      });
+      const res = await apiFetch(`/api/tools/mcx-sandbox-ladder?${qs.toString()}`, { accessToken });
+      const json = await res.json();
+      if (!res.ok || json?.status !== "success") throw new Error(extractReason(json, "Failed to load ladder"));
+      setLadder(json.data);
+    } catch (e) {
+      setLadder(null);
+      setStatus({ kind: "error", text: e.message || "Failed to load ladder" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadLadder();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [optionType]);
+
+  const slots = useMemo(() => ladder?.slots || {}, [ladder]);
+
+  const placeForSlot = async (slotName) => {
+    const slot = slots[slotName];
+    if (!slot?.instrument_key) return;
+    setPlacingSlot(slotName);
+    setStatus({ kind: "", text: "" });
+    try {
+      const res = await apiFetch("/api/sandbox/order/place", {
+        accessToken,
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          instrument_token: slot.instrument_key,
+          quantity: 1,
+          order_type: "MARKET",
+          transaction_type: "BUY",
+          product: "I",
+          validity: "DAY",
+          tag: `mcx-${slotName.toLowerCase()}`,
+        }),
+      });
+      const text = await res.text();
+      let json = null;
+      try { json = text ? JSON.parse(text) : null; } catch { json = text || null; }
+      if (!res.ok) throw new Error(extractReason(json, `Order failed (HTTP ${res.status})`));
+      setStatus({ kind: "success", text: `${slotName} BUY placed for ${slot.trading_symbol}` });
+    } catch (e) {
+      setStatus({ kind: "error", text: e.message || "Order failed" });
+    } finally {
+      setPlacingSlot("");
+    }
+  };
+
+  return (
+    <div className="mcx-page">
+      <div className="mcx-hero">
+        <div>
+          <h2>MCX Sandbox Order Studio</h2>
+          <p>One-click BUY market intraday entries for ATM / ITM / OTM ladder in Upstox sandbox.</p>
+        </div>
+        <div className="mcx-controls">
+          <input value={baseKey} onChange={(e) => setBaseKey(e.target.value)} placeholder="Base instrument key" />
+          <select value={optionType} onChange={(e) => setOptionType(e.target.value)}>
+            <option value="CE">CE</option>
+            <option value="PE">PE</option>
+          </select>
+          <button type="button" onClick={loadLadder} disabled={loading}>
+            {loading ? "Refreshing..." : "Refresh Ladder"}
+          </button>
+        </div>
+      </div>
+
+      <div className="mcx-meta">
+        <span>Default base: {DEFAULT_BASE_KEY}</span>
+        {ladder?.base?.ltp ? <span>Spot: {Number(ladder.base.ltp).toFixed(2)}</span> : null}
+        {ladder?.atm_strike ? <span>ATM: {ladder.atm_strike}</span> : null}
+      </div>
+
+      {status.text ? (
+        <div className={`mcx-status ${status.kind === "error" ? "mcx-status-error" : "mcx-status-success"}`}>
+          {status.text}
+        </div>
+      ) : null}
+
+      <div className="mcx-grid">
+        {SLOT_ORDER.map((slotName) => {
+          const slot = slots[slotName];
+          return (
+            <div key={slotName} className="mcx-card">
+              <div className="mcx-card-top">
+                <span className="mcx-badge">{slotName}</span>
+                <span className="mcx-type">{optionType}</span>
+              </div>
+              <div className="mcx-symbol">{slot?.trading_symbol || "--"}</div>
+              <div className="mcx-kv">
+                <span>Strike</span>
+                <strong>{slot?.strike ?? "--"}</strong>
+              </div>
+              <div className="mcx-kv">
+                <span>Instrument Key</span>
+                <strong className="mcx-key">{slot?.instrument_key || "--"}</strong>
+              </div>
+              <div className="mcx-kv">
+                <span>Quantity</span>
+                <strong>1</strong>
+              </div>
+              <div className="mcx-kv">
+                <span>Order</span>
+                <strong>BUY · MARKET · INTRADAY</strong>
+              </div>
+              <button
+                type="button"
+                className="mcx-place-btn"
+                disabled={!slot?.instrument_key || placingSlot === slotName}
+                onClick={() => placeForSlot(slotName)}
+              >
+                {placingSlot === slotName ? "Placing..." : `Place ${slotName}`}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

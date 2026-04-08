@@ -102,6 +102,7 @@ const FALLBACK_ACCESS_TOKEN = process.env.UPSTOX_ACCESS_TOKEN
     ? process.env.UPSTOX_ACCESS_TOKEN
     : `Bearer ${process.env.UPSTOX_ACCESS_TOKEN}`)
   : "";
+const DEFAULT_MCX_BASE_KEY = "MCX_FO|554671";
 
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
@@ -1080,6 +1081,173 @@ app.get("/api/atm-options", async (req, res) => {
   } catch (error) {
     console.error("ATM Options Error:", error.message);
     res.status(500).json({ error: error.message });
+  }
+});
+
+function nearestStrike(strikes, spot) {
+  if (!Array.isArray(strikes) || strikes.length === 0) return null;
+  return [...strikes].sort((a, b) => Math.abs(a - spot) - Math.abs(b - spot))[0];
+}
+
+function parseExpiryMs(v) {
+  if (v == null) return NaN;
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  const s = String(v).trim();
+  if (!s) return NaN;
+  if (/^\d+$/.test(s)) return Number(s);
+  const dmy = /^(\d{2})-(\d{2})-(\d{4})$/.exec(s);
+  if (dmy) {
+    const [, dd, mm, yyyy] = dmy;
+    return Date.parse(`${yyyy}-${mm}-${dd}T00:00:00+05:30`);
+  }
+  const t = Date.parse(s);
+  return Number.isFinite(t) ? t : NaN;
+}
+
+function buildMoneynessSlots(strikesAsc, atmStrike, optionType) {
+  const idx = strikesAsc.findIndex((x) => x === atmStrike);
+  if (idx < 0) return {};
+  const isCE = optionType === "CE";
+  const itmDir = isCE ? -1 : 1;
+  const otmDir = isCE ? 1 : -1;
+  const at = (i) => (i >= 0 && i < strikesAsc.length ? strikesAsc[i] : null);
+  return {
+    ATM: at(idx),
+    ITM1: at(idx + itmDir * 1),
+    ITM2: at(idx + itmDir * 2),
+    ITM3: at(idx + itmDir * 3),
+    OTM1: at(idx + otmDir * 1),
+  };
+}
+
+// MCX sandbox ladder for base instrument (default MCX_FO|554671)
+app.get("/api/tools/mcx-sandbox-ladder", async (req, res) => {
+  try {
+    const accessToken = req.headers.authorization || FALLBACK_ACCESS_TOKEN;
+    if (!accessToken) {
+      return res.status(400).json({
+        error: "Missing Authorization Header and UPSTOX_ACCESS_TOKEN not configured on server",
+      });
+    }
+
+    const baseInstrumentKey = String(req.query.base_instrument_key || DEFAULT_MCX_BASE_KEY).trim();
+    const optionType = String(req.query.option_type || "CE").toUpperCase() === "PE" ? "PE" : "CE";
+    const allData = await loadCompleteData();
+    if (!allData) return res.status(503).json({ error: "Could not load master list" });
+
+    const base = allData.find((i) => i.instrument_key === baseInstrumentKey);
+    if (!base) return res.status(404).json({ error: `Base instrument not found: ${baseInstrumentKey}` });
+
+    const baseName = base.name;
+    const mcxOptions = allData.filter((i) =>
+      String(i.segment || "").startsWith("MCX") &&
+      i.name === baseName &&
+      i.instrument_type === optionType &&
+      Number.isFinite(Number(i.strike_price)),
+    );
+    if (mcxOptions.length === 0) {
+      return res.status(404).json({ error: `No MCX ${optionType} options found for ${baseName}` });
+    }
+
+    const now = Date.now();
+    const expiries = [...new Set(mcxOptions.map((o) => parseExpiryMs(o.expiry)).filter((x) => Number.isFinite(x)))].sort((a, b) => a - b);
+    const nearestExpiry = expiries.find((e) => e >= now) || expiries[0];
+    const expiryOptions = mcxOptions.filter((o) => parseExpiryMs(o.expiry) === nearestExpiry);
+    const strikesAsc = [...new Set(expiryOptions.map((o) => Number(o.strike_price)).filter((x) => Number.isFinite(x)))].sort((a, b) => a - b);
+    if (strikesAsc.length === 0) return res.status(404).json({ error: "No strikes found for nearest expiry" });
+
+    const quoteKey = (base.instrument_type === "CE" || base.instrument_type === "PE")
+      ? (base.asset_key || baseInstrumentKey)
+      : baseInstrumentKey;
+    const quoteRes = await axios.get(
+      `https://api.upstox.com/v2/market-quote/quotes?instrument_key=${encodeURIComponent(quoteKey)}`,
+      { headers: { Authorization: accessToken, Accept: "application/json" } },
+    );
+    const q = Object.values(quoteRes.data?.data || {})[0];
+    const spot = Number(q?.last_price || 0);
+    if (!spot) return res.status(500).json({ error: "Could not fetch base/underlying price" });
+
+    const atmStrike = nearestStrike(strikesAsc, spot);
+    const slotStrikes = buildMoneynessSlots(strikesAsc, atmStrike, optionType);
+    const byStrike = new Map(expiryOptions.map((o) => [Number(o.strike_price), o]));
+
+    const slots = Object.fromEntries(
+      Object.entries(slotStrikes).map(([label, strike]) => {
+        const inst = strike == null ? null : byStrike.get(strike) || null;
+        return [label, inst ? {
+          label,
+          strike: Number(inst.strike_price),
+          instrument_key: inst.instrument_key,
+          trading_symbol: inst.trading_symbol,
+          lot_size: Number(inst.lot_size || 1),
+          type: optionType,
+        } : null];
+      }),
+    );
+
+    res.json({
+      status: "success",
+      data: {
+        base: {
+          instrument_key: baseInstrumentKey,
+          trading_symbol: base.trading_symbol,
+          name: baseName,
+          segment: base.segment,
+          quote_from_instrument_key: quoteKey,
+          ltp: spot,
+        },
+        option_type: optionType,
+        expiry: nearestExpiry,
+        atm_strike: atmStrike,
+        slots,
+      },
+    });
+  } catch (error) {
+    console.error("MCX ladder error:", error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Sandbox-oriented place order endpoint (defaults: qty=1, MARKET, Intraday)
+app.post("/api/sandbox/order/place", async (req, res) => {
+  try {
+    const accessToken = req.headers.authorization || FALLBACK_ACCESS_TOKEN;
+    if (!accessToken) {
+      return res.status(400).json({
+        error: "Missing Authorization Header and UPSTOX_ACCESS_TOKEN not configured on server",
+      });
+    }
+
+    const body = req.body || {};
+    const instrument_token = String(body.instrument_token || "").trim();
+    if (!instrument_token) return res.status(400).json({ error: "instrument_token is required" });
+
+    const payload = {
+      quantity: Number(body.quantity || 1),
+      product: String(body.product || "I"),
+      validity: String(body.validity || "DAY"),
+      price: Number(body.price || 0),
+      tag: body.tag ? String(body.tag) : "mcx-sandbox-ui",
+      instrument_token,
+      order_type: String(body.order_type || "MARKET"),
+      transaction_type: String(body.transaction_type || "BUY"),
+      disclosed_quantity: Number(body.disclosed_quantity || 0),
+      trigger_price: Number(body.trigger_price || 0),
+      is_amo: Boolean(body.is_amo || false),
+      slice: Boolean(body.slice || false),
+    };
+
+    const response = await axios.post("https://api-hft.upstox.com/v3/order/place", payload, {
+      headers: {
+        Authorization: accessToken,
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+    });
+    res.json(response.data);
+  } catch (error) {
+    const errorData = error.response ? error.response.data : { error: error.message };
+    res.status(error.response?.status || 500).json(errorData);
   }
 });
 

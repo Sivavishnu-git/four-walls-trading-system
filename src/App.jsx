@@ -5,6 +5,7 @@ import { isValidAccessToken } from "./utils/authToken";
 import { Activity, LogIn, TrendingUp } from "lucide-react";
 import { OIMonitor } from "./components/OIMonitor";
 import { OrderPlacementPanel } from "./components/OrderPlacementPanel";
+import { McxSandboxOrderPage } from "./components/McxSandboxOrderPage";
 
 class TabErrorBoundary extends React.Component {
   state = { hasError: false, error: null };
@@ -58,6 +59,7 @@ function App() {
   const [instrumentSymbol, setInstrumentSymbol] = useState("");
   const [niftyFutLtp, setNiftyFutLtp] = useState(null);
   const [niftyFutChange, setNiftyFutChange] = useState(null);
+  const [activePage, setActivePage] = useState("monitor");
 
   useEffect(() => {
     apiFetch("/api/tools/discover-nifty-future")
@@ -278,6 +280,32 @@ function App() {
             <div style={{ fontWeight: 700, color: "#fff", fontSize: "0.95rem" }}>OI Monitor</div>
             <div style={{ fontSize: "0.7rem", color: "#888" }}>Four Walls Trading</div>
           </div>
+          <div style={{ marginLeft: 12, display: "flex", gap: 6 }}>
+            <button
+              type="button"
+              onClick={() => setActivePage("monitor")}
+              style={{
+                padding: "6px 10px",
+                fontSize: "0.72rem",
+                background: activePage === "monitor" ? "rgba(38,166,154,0.2)" : "rgba(255,255,255,0.08)",
+                border: activePage === "monitor" ? "1px solid rgba(38,166,154,0.45)" : "1px solid rgba(255,255,255,0.16)",
+              }}
+            >
+              OI Monitor
+            </button>
+            <button
+              type="button"
+              onClick={() => setActivePage("mcx")}
+              style={{
+                padding: "6px 10px",
+                fontSize: "0.72rem",
+                background: activePage === "mcx" ? "rgba(41,98,255,0.22)" : "rgba(255,255,255,0.08)",
+                border: activePage === "mcx" ? "1px solid rgba(41,98,255,0.45)" : "1px solid rgba(255,255,255,0.16)",
+              }}
+            >
+              MCX Sandbox
+            </button>
+          </div>
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
@@ -324,10 +352,18 @@ function App() {
           position: "relative",
         }}
       >
-        <OrderPlacementPanel instrumentKey={instrumentKey} accessToken={accessToken} />
-        <TabErrorBoundary>
-          <OIMonitor instrumentKey={instrumentKey} />
-        </TabErrorBoundary>
+        {activePage === "mcx" ? (
+          <TabErrorBoundary>
+            <McxSandboxOrderPage accessToken={accessToken} />
+          </TabErrorBoundary>
+        ) : (
+          <>
+            <OrderPlacementPanel instrumentKey={instrumentKey} accessToken={accessToken} />
+            <TabErrorBoundary>
+              <OIMonitor instrumentKey={instrumentKey} />
+            </TabErrorBoundary>
+          </>
+        )}
       </div>
     </div>
   );
