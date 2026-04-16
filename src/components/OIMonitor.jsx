@@ -170,23 +170,33 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
             if (prevCapturedOIRef.current !== null) {
                 const barChange = oi - prevCapturedOIRef.current;
                 if (Math.abs(barChange) > 30000) {
+                    const alertTime = timestamp.toLocaleTimeString("en-IN", { hour12: false });
                     const alertObj = {
                         id: Date.now(),
-                        time: timestamp.toLocaleTimeString("en-IN", { hour12: false }),
+                        time: alertTime,
                         barChange,
                         oi,
                         ltp,
                     };
                     setOiAlerts((prev) => [alertObj, ...prev].slice(0, 20));
+
+                    // Browser notification (desktop)
                     if (typeof Notification !== "undefined" && Notification.permission === "granted") {
                         new Notification(
                             `OI Alert: ${barChange > 0 ? "▲ Added" : "▼ Unwound"} ${Math.abs(barChange).toLocaleString("en-IN")}`,
                             {
-                                body: `OI: ${oi.toLocaleString("en-IN")} | LTP: ₹${ltp.toFixed(2)} at ${alertObj.time}`,
+                                body: `OI: ${oi.toLocaleString("en-IN")} | LTP: ₹${ltp.toFixed(2)} at ${alertTime}`,
                                 tag: "oi-alert",
                             },
                         );
                     }
+
+                    // Telegram phone alert (fire-and-forget)
+                    apiFetch("/api/oi-alert", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ barChange, oi, ltp, time: alertTime }),
+                    }).catch(() => {/* silently ignore if Telegram not configured */});
                 }
             }
             prevCapturedOIRef.current = oi;
