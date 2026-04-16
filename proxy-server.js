@@ -1735,20 +1735,6 @@ app.get("/api/trade-setup", async (req, res) => {
   }
 });
 
-// In production, serve the built React frontend
-if (IS_PROD) {
-  const __dirname = path.dirname(fileURLToPath(import.meta.url));
-  const distPath = path.join(__dirname, "dist");
-  if (fs.existsSync(distPath)) {
-    app.use(express.static(distPath));
-    // Express 5 / path-to-regexp v8: "*" is invalid; use named wildcard for SPA fallback
-    app.get("/{*path}", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
-    console.log("Serving static frontend from dist/");
-  }
-}
-
 // ── Telegram OI Alert ───────────────────────────────────────────────────────
 // POST /api/oi-alert   { barChange, oi, ltp, time }
 // Reads TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID from env and forwards a message.
@@ -1880,6 +1866,20 @@ app.get("/api/sensex-options", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// In production, serve the built React frontend (must be after ALL API routes)
+if (IS_PROD) {
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const distPath = path.join(__dirname, "dist");
+  if (fs.existsSync(distPath)) {
+    app.use(express.static(distPath));
+    // Express 5 / path-to-regexp v8: "*" is invalid; use named wildcard for SPA fallback
+    app.get("/{*path}", (req, res) => {
+      res.sendFile(path.join(distPath, "index.html"));
+    });
+    console.log("Serving static frontend from dist/");
+  }
+}
 
 // ── HTTP server + WebSocket server (shared port) ─────────────────────────────
 const server = http.createServer(app);
