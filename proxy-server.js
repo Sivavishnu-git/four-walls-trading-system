@@ -1870,20 +1870,6 @@ app.get("/api/sensex-options", async (req, res) => {
   }
 });
 
-// In production, serve the built React frontend (must be after ALL API routes)
-if (IS_PROD) {
-  const __dirname = path.dirname(fileURLToPath(import.meta.url));
-  const distPath = path.join(__dirname, "dist");
-  if (fs.existsSync(distPath)) {
-    app.use(express.static(distPath));
-    // Express 5 / path-to-regexp v8: "*" is invalid; use named wildcard for SPA fallback
-    app.get("/{*path}", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
-    console.log("Serving static frontend from dist/");
-  }
-}
-
 // ── AWS Cost Analysis API ─────────────────────────────────────────────────────
 // GET /api/aws/costs?period=current|last|3months
 const ceClient = new CostExplorerClient({ region: "us-east-1" }); // Cost Explorer is global, must use us-east-1
@@ -1969,6 +1955,20 @@ app.get("/api/aws/costs", async (req, res) => {
     res.status(500).json({ status: "error", error: err.message });
   }
 });
+
+// In production, serve the built React frontend (must be after ALL API routes)
+if (IS_PROD) {
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const distPath = path.join(__dirname, "dist");
+  if (fs.existsSync(distPath)) {
+    app.use(express.static(distPath));
+    // Express 5 / path-to-regexp v8: "*" is invalid; use named wildcard for SPA fallback
+    app.get("/{*path}", (req, res) => {
+      res.sendFile(path.join(distPath, "index.html"));
+    });
+    console.log("Serving static frontend from dist/");
+  }
+}
 
 // ── Future OI History API ─────────────────────────────────────────────────────
 // GET /api/oi/latest              → latest snapshot for all 3 futures
