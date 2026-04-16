@@ -102,7 +102,36 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
     }, [propInstrumentKey]);
 
     useEffect(() => {
-        setOiHistory(loadOiHistoryFromStorage(instrumentKey));
+        const fromStorage = loadOiHistoryFromStorage(instrumentKey);
+        if (fromStorage.length > 0) {
+            setOiHistory(fromStorage);
+            return;
+        }
+        // localStorage empty — seed with last 5 records from DB
+        apiFetch("/api/oi/history?limit=5")
+            .then((r) => r.json())
+            .then(({ data }) => {
+                if (!Array.isArray(data) || data.length === 0) return;
+                const todayStr = new Date().toDateString();
+                const seeded = data
+                    .map((row) => {
+                        const fullTime = new Date(row.ts);
+                        const prevOI   = row.oi - row.oi_change;
+                        return {
+                            time:          row.time,
+                            oi:            row.oi,
+                            ltp:           row.ltp,
+                            change:        row.oi_change,
+                            changePercent: prevOI > 0 ? +((row.oi_change / prevOI) * 100).toFixed(2) : 0,
+                            fullTime,
+                            symbol:        row.symbol,
+                        };
+                    })
+                    .filter((r) => r.fullTime.toDateString() === todayStr)
+                    .reverse(); // DB returns DESC, display needs ASC
+                if (seeded.length > 0) setOiHistory(seeded);
+            })
+            .catch(() => { /* silently ignore — DB may be empty */ });
     }, [instrumentKey]);
 
     useEffect(() => {
