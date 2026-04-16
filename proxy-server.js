@@ -14,6 +14,7 @@ import { setTimeout as sleep } from "timers/promises";
 import { WebSocketServer } from "ws";
 import { updateEnvToken } from "./utils/tokenManager.js";
 import { computeIntradayPivots } from "./src/utils/intradayPivots.js";
+import { startOITracker, getOIHistory, getLatestOI } from "./oi-tracker.js";
 
 const gunzip = promisify(zlib.gunzip);
 
@@ -1881,6 +1882,22 @@ if (IS_PROD) {
   }
 }
 
+// ── Future OI History API ─────────────────────────────────────────────────────
+// GET /api/oi/latest              → latest snapshot for all 3 futures
+// GET /api/oi/history?symbol=NIFTY&date=2025-06-16&limit=100
+app.get("/api/oi/latest", (_req, res) => {
+  try { res.json({ status: "success", data: getLatestOI() }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get("/api/oi/history", (req, res) => {
+  try {
+    const { symbol, date, limit } = req.query;
+    const rows = getOIHistory({ symbol, date, limit: limit ? Number(limit) : 200 });
+    res.json({ status: "success", data: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── HTTP server + WebSocket server (shared port) ─────────────────────────────
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
@@ -1944,4 +1961,10 @@ wss.on("connection", (ws) => {
 server.listen(PORT, () => {
   console.log(`Proxy Server V3 running on http://localhost:${PORT} [${IS_PROD ? "PRODUCTION" : "DEVELOPMENT"}]`);
   console.log(`WebSocket server ready on ws://localhost:${PORT}`);
+
+  // Start Future OI tracker (polls every 3 min during market hours)
+  startOITracker({
+    getAccessToken: () => FALLBACK_ACCESS_TOKEN,
+    getMasterData,
+  });
 });
