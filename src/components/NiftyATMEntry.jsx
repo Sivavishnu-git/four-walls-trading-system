@@ -458,21 +458,66 @@ export function NiftyATMEntry({ accessToken }) {
             ))}
           </div>
 
-          {/* rows */}
+          {/* rows — grouped by strike with OTM/ATM/ITM section labels */}
           <div style={{ padding: "8px 8px" }}>
-            {options.map(opt => (
-              <OptionRow
-                key={opt.instrument_key}
-                opt={opt}
-                isATM={opt.strike === atm_strike}
-                lots={lots}
-                lotSize={opt.lot_size || 75}
-                orderType={orderType}
-                limitPrice={limitPrice}
-                product={product}
-                onOrder={initiateOrder}
-              />
-            ))}
+            {(() => {
+              // Unique strikes ascending
+              const strikes = [...new Set(options.map(o => o.strike))].sort((a, b) => a - b);
+              const rows = [];
+              let lastSection = null;
+
+              for (const strike of strikes) {
+                // Section label per strike
+                const diff = strike - atm_strike;
+                let section;
+                if (diff === 0) section = "ATM";
+                else if (diff > 0) section = diff <= 100 ? "Near ATM" : "OTM (CE side)";
+                else section = diff >= -100 ? "Near ATM" : "OTM (PE side)";
+
+                if (section !== lastSection) {
+                  lastSection = section;
+                  const sectionColor =
+                    section === "ATM" ? YELLOW :
+                    section.startsWith("OTM") ? RED :
+                    DIM;
+                  rows.push(
+                    <div key={`sec-${strike}`} style={{
+                      padding: "4px 14px 2px",
+                      fontSize: "0.65rem",
+                      fontWeight: 700,
+                      color: sectionColor,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.08em",
+                      borderTop: lastSection === null ? "none" : `1px solid ${BORDER}`,
+                      marginTop: lastSection === null ? 0 : 4,
+                      paddingTop: 8,
+                    }}>
+                      {section}
+                    </div>
+                  );
+                }
+
+                const strikeOpts = options.filter(o => o.strike === strike);
+                // CE first, then PE
+                strikeOpts.sort((a, b) => a.type === "CE" ? -1 : 1);
+                for (const opt of strikeOpts) {
+                  rows.push(
+                    <OptionRow
+                      key={opt.instrument_key}
+                      opt={opt}
+                      isATM={opt.strike === atm_strike}
+                      lots={lots}
+                      lotSize={opt.lot_size || 75}
+                      orderType={orderType}
+                      limitPrice={limitPrice}
+                      product={product}
+                      onOrder={initiateOrder}
+                    />
+                  );
+                }
+              }
+              return rows;
+            })()}
           </div>
         </div>
       ) : !loading && (

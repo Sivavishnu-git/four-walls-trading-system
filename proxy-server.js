@@ -1025,7 +1025,11 @@ app.get("/api/atm-options", async (req, res) => {
     if (!spotPrice) return res.status(500).json({ error: "Could not get Nifty Future price" });
 
     const atm = Math.round(spotPrice / 50) * 50;
-    const nearStrikes = [atm - 100, atm - 50, atm, atm + 50, atm + 100];
+    const nearStrikes = [
+      atm - 200, atm - 150, atm - 100, atm - 50,
+      atm,
+      atm + 50, atm + 100, atm + 150, atm + 200,
+    ];
 
     const niftyOptions = instruments.filter(
       i => i.name === "NIFTY" && (i.instrument_type === "CE" || i.instrument_type === "PE")
