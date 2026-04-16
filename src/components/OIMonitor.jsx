@@ -39,14 +39,19 @@ function deserializeOiHistory(json) {
     try {
         const raw = JSON.parse(json);
         if (!Array.isArray(raw)) return [];
-        return raw.slice(0, OI_HISTORY_MAX_ROWS).map((row) => ({
-            time: row.time,
-            oi: row.oi,
-            ltp: row.ltp,
-            change: row.change,
-            changePercent: row.changePercent,
-            fullTime: row.fullTime ? new Date(row.fullTime) : new Date(),
-        }));
+        const todayStr = new Date().toDateString();
+        return raw
+            .map((row) => ({
+                time: row.time,
+                oi: row.oi,
+                ltp: row.ltp,
+                change: row.change,
+                changePercent: row.changePercent,
+                fullTime: row.fullTime ? new Date(row.fullTime) : new Date(),
+            }))
+            // Only keep entries from today's trading session
+            .filter((row) => row.fullTime.toDateString() === todayStr)
+            .slice(0, OI_HISTORY_MAX_ROWS);
     } catch {
         return [];
     }
