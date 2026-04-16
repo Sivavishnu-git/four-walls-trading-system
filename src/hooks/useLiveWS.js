@@ -11,20 +11,26 @@ function getWsUrl() {
 
 /**
  * useLiveWS — subscribes instrument keys to the proxy WebSocket and receives
- * live quote updates every ~1.5 s (pushed by the proxy from Upstox REST).
+ * live quote updates pushed by the proxy from the Upstox WebSocket feed.
+ *
+ * Handles both message types emitted by the proxy:
+ *   { type: "tick",   data: { instrument_key, ltp, ltt, ltq, oi, volume, cp, atp } }
+ *   { type: "quotes", data: { [instrument_key]: { ltp, oi, change, volume } } }
  *
  * @param {string[]} instrumentKeys  Upstox instrument keys to subscribe
  * @param {string}   accessToken     Bearer token forwarded to the proxy
- * @returns {{ data: Object, status: string }}
- *   data   — keyed by instrument_key: { ltp, oi, change, volume }
- *   status — "connecting" | "connected" | "disconnected" | "error"
+ * @returns {{ data: Object, status: string, lastTick: Object|null }}
+ *   data      — keyed by instrument_key: { ltp, oi, change, volume }
+ *   lastTick  — the most recent raw tick (for chart candle aggregation)
+ *   status    — "connecting" | "connected" | "disconnected" | "error"
  */
 export function useLiveWS(instrumentKeys, accessToken) {
-  const [data, setData]     = useState({});
-  const [status, setStatus] = useState("connecting");
-  const wsRef               = useRef(null);
-  const keysRef             = useRef(instrumentKeys);
-  const tokenRef            = useRef(accessToken);
+  const [data, setData]         = useState({});
+  const [lastTick, setLastTick] = useState(null);
+  const [status, setStatus]     = useState("connecting");
+  const wsRef                   = useRef(null);
+  const keysRef                 = useRef(instrumentKeys);
+  const tokenRef                = useRef(accessToken);
 
   // Keep refs in sync without restarting the connection
   useEffect(() => { keysRef.current = instrumentKeys; }, [instrumentKeys]);
@@ -33,8 +39,8 @@ export function useLiveWS(instrumentKeys, accessToken) {
   const sendSubscribe = useCallback((ws) => {
     if (ws.readyState === WebSocket.OPEN && keysRef.current.length > 0 && tokenRef.current) {
       ws.send(JSON.stringify({
-        type: "subscribe",
-        keys: keysRef.current,
+        type:  "subscribe",
+        keys:  keysRef.current,
         token: tokenRef.current,
       }));
     }
@@ -45,7 +51,7 @@ export function useLiveWS(instrumentKeys, accessToken) {
 
     let ws;
     let reconnectTimer = null;
-    let destroyed = false;
+    let destroyed      = false;
 
     function connect() {
       if (destroyed) return;
@@ -62,10 +68,30 @@ export function useLiveWS(instrumentKeys, accessToken) {
       ws.onmessage = (e) => {
         try {
           const msg = JSON.parse(e.data);
+
+          // ── new tick format (from Upstox WebSocket feed) ──────────────────
+          if (msg.type === "tick" && msg.data) {
+            const t = msg.data;
+            setLastTick(t); // raw tick for chart candle building
+            setData((prev) => ({
+              ...prev,
+              [t.instrument_key]: {
+                ltp:    t.ltp,
+                oi:     t.oi,
+                volume: t.volume,
+                change: t.ltp - t.cp,   // cp = previous close price
+                atp:    t.atp,
+                ltt:    t.ltt,
+                ltq:    t.ltq,
+              },
+            }));
+          }
+
+          // ── backward-compatible quotes format ─────────────────────────────
           if (msg.type === "quotes" && msg.data) {
             setData((prev) => ({ ...prev, ...msg.data }));
           }
-        } catch { /* ignore */ }
+        } catch { /* ignore malformed */ }
       };
 
       ws.onerror = () => setStatus("error");
@@ -73,7 +99,6 @@ export function useLiveWS(instrumentKeys, accessToken) {
       ws.onclose = () => {
         if (destroyed) return;
         setStatus("disconnected");
-        // Reconnect after 3 s
         reconnectTimer = setTimeout(connect, 3000);
       };
     }
@@ -85,17 +110,14 @@ export function useLiveWS(instrumentKeys, accessToken) {
       clearTimeout(reconnectTimer);
       if (ws) ws.close();
     };
-  // Only restart when keys or token actually change
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(instrumentKeys), accessToken]);
 
   // Re-subscribe if keys change while connected
   useEffect(() => {
     const ws = wsRef.current;
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      sendSubscribe(ws);
-    }
+    if (ws && ws.readyState === WebSocket.OPEN) sendSubscribe(ws);
   }, [JSON.stringify(instrumentKeys), sendSubscribe]);
 
-  return { data, status };
+  return { data, lastTick, status };
 }

@@ -15,6 +15,7 @@ import { WebSocketServer } from "ws";
 import { updateEnvToken } from "./utils/tokenManager.js";
 import { computeIntradayPivots } from "./src/utils/intradayPivots.js";
 import { startOITracker, getOIHistory, getLatestOI } from "./oi-tracker.js";
+import { upstoxFeed, startFeed } from "./upstox-feed.js";
 
 const gunzip = promisify(zlib.gunzip);
 
@@ -1902,59 +1903,62 @@ app.get("/api/oi/history", (req, res) => {
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-// Each client subscribes to a set of instrument keys.
-// The proxy polls Upstox REST at 1.5 s intervals and pushes JSON quotes.
+// ── Single Upstox WebSocket feed → fan-out to frontend clients ───────────────
+// clientSubs: Map<ws, Set<string>>  tracks which instrument keys each client wants
+const clientSubs = new Map();
+
 wss.on("connection", (ws) => {
-  let pollTimer = null;
-  let subscribedKeys = [];
-  let clientToken = null;
+  clientSubs.set(ws, new Set());
 
   ws.on("message", (raw) => {
     try {
       const msg = JSON.parse(raw.toString());
-      if (msg.type === "subscribe" && Array.isArray(msg.keys) && msg.token) {
-        subscribedKeys = msg.keys;
-        clientToken = msg.token;
-        startPolling();
+
+      if (msg.type === "subscribe" && Array.isArray(msg.keys)) {
+        const subs = clientSubs.get(ws);
+        if (!subs) return;
+        msg.keys.forEach((k) => subs.add(k));
+        // Tell the feed about the new keys (feed sends diff only)
+        upstoxFeed.subscribe(msg.keys);
       } else if (msg.type === "unsubscribe") {
-        stopPolling();
+        clientSubs.delete(ws);
+        clientSubs.set(ws, new Set());
       }
     } catch { /* ignore malformed */ }
   });
 
-  ws.on("close", stopPolling);
-  ws.on("error", stopPolling);
-
-  function stopPolling() {
-    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  function cleanup() {
+    clientSubs.delete(ws);
   }
 
-  function startPolling() {
-    stopPolling();
-    poll(); // immediate first tick
-    pollTimer = setInterval(poll, 1500);
-  }
+  ws.on("close", cleanup);
+  ws.on("error", cleanup);
+});
 
-  async function poll() {
-    if (!subscribedKeys.length || !clientToken || ws.readyState !== 1) return;
-    try {
-      const url = `https://api.upstox.com/v2/market-quote/quotes?instrument_key=${encodeURIComponent(subscribedKeys.join(","))}`;
-      const r = await axios.get(url, {
-        headers: { Authorization: clientToken, Accept: "application/json" },
-        timeout: 5000,
-      });
-      if (!r.data?.data) return;
-      const quotes = {};
-      for (const [, q] of Object.entries(r.data.data)) {
-        quotes[q.instrument_token] = {
-          ltp: q.last_price || 0, oi: q.oi || 0,
-          change: q.net_change || 0, volume: q.volume || 0,
-        };
-      }
-      if (ws.readyState === 1) {
-        ws.send(JSON.stringify({ type: "quotes", data: quotes }));
-      }
-    } catch { /* network blip, skip */ }
+// Forward ticks from the single Upstox feed to all subscribed frontend clients
+upstoxFeed.on("tick", (tick) => {
+  const { instrument_key, ltp, ltt, ltq, oi, volume, cp, atp } = tick;
+
+  // New-style per-instrument tick message
+  const tickMsg = JSON.stringify({
+    type: "tick",
+    data: { instrument_key, ltp, ltt, ltq, oi, volume, cp, atp },
+  });
+
+  // Backward-compatible quotes message (OIMonitor, SensexOptionChain, NiftyATMEntry)
+  const change = cp ? ltp - cp : 0;
+  const quotesMsg = JSON.stringify({
+    type: "quotes",
+    data: {
+      [instrument_key]: { ltp, oi, change, volume },
+    },
+  });
+
+  for (const [ws, subs] of clientSubs) {
+    if (ws.readyState !== 1) continue;
+    if (!subs.has(instrument_key)) continue;
+    ws.send(tickMsg);
+    ws.send(quotesMsg);
   }
 });
 
@@ -1967,4 +1971,7 @@ server.listen(PORT, () => {
     getAccessToken: () => FALLBACK_ACCESS_TOKEN,
     getMasterData,
   });
+
+  // Start the single Upstox market-data WebSocket feed
+  startFeed(FALLBACK_ACCESS_TOKEN);
 });
