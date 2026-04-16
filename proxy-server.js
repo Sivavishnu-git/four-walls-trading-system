@@ -1026,9 +1026,9 @@ app.get("/api/atm-options", async (req, res) => {
 
     const atm = Math.round(spotPrice / 50) * 50;
     const nearStrikes = [
-      atm - 200, atm - 150, atm - 100, atm - 50,
+      atm - 250, atm - 200, atm - 150, atm - 100, atm - 50,
       atm,
-      atm + 50, atm + 100, atm + 150, atm + 200,
+      atm + 50, atm + 100, atm + 150, atm + 200, atm + 250,
     ];
 
     const niftyOptions = instruments.filter(

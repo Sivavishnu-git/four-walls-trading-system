@@ -104,10 +104,19 @@ function OIBar({ oi, maxOI, color }) {
 }
 
 // ── strike row (CE | Strike+PCR | PE) ────────────────────────────────────────
-function StrikeRow({ ce, pe, isATM, maxCeOI, maxPeOI, lots, orderType, limitPrice, product, onOrder, spotPrice, strike }) {
+function StrikeRow({ ce, pe, isATM, maxCeOI, maxPeOI, lots, orderType, limitPrice, product, onOrder, spotPrice, strike, atmStrike }) {
   const pcr     = ce?.oi > 0 ? (pe?.oi || 0) / ce.oi : null;
   const ceChPct = ce ? (ce.change / (ce.ltp - ce.change || 1)) * 100 : null;
   const peChPct = pe ? (pe.change / (pe.ltp - pe.change || 1)) * 100 : null;
+
+  // Moneyness relative to ATM (each step = 50 pts)
+  const steps = atmStrike ? Math.round((strike - atmStrike) / 50) : 0;
+  // CE: positive steps = OTM, negative = ITM
+  // PE: positive steps = ITM, negative = OTM
+  const ceLabel = steps === 0 ? null : steps > 0 ? `OTM${steps}` : `ITM${Math.abs(steps)}`;
+  const peLabel = steps === 0 ? null : steps > 0 ? `ITM${steps}` : `OTM${Math.abs(steps)}`;
+  const ceLabelColor = steps > 0 ? RED : GREEN;   // CE OTM=red, ITM=green
+  const peLabelColor = steps > 0 ? GREEN : RED;   // PE ITM=green, OTM=red
 
   const sideStyle = (align) => ({
     display: "flex",
@@ -152,10 +161,10 @@ function StrikeRow({ ce, pe, isATM, maxCeOI, maxPeOI, lots, orderType, limitPric
         ) : <span style={{ color: DIM, fontSize: "0.75rem" }}>—</span>}
       </div>
 
-      {/* ── Center: Strike + PCR ── */}
+      {/* ── Center: Strike + moneyness + PCR ── */}
       <div style={{
         display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-        padding: "10px 6px", gap: 3,
+        padding: "10px 6px", gap: 2,
         background: isATM ? `${YELLOW}0d` : "transparent",
       }}>
         <div style={{
@@ -166,11 +175,20 @@ function StrikeRow({ ce, pe, isATM, maxCeOI, maxPeOI, lots, orderType, limitPric
         }}>
           {strike}
         </div>
-        {isATM && (
+        {isATM ? (
           <span style={{ fontSize: "0.58rem", fontWeight: 700, color: YELLOW, background: `${YELLOW}22`, borderRadius: 3, padding: "1px 5px", letterSpacing: "0.05em" }}>ATM</span>
+        ) : (
+          <div style={{ display: "flex", gap: 3, alignItems: "center" }}>
+            <span style={{ fontSize: "0.58rem", fontWeight: 700, color: ceLabelColor, background: `${ceLabelColor}18`, borderRadius: 3, padding: "1px 4px" }}>
+              CE {ceLabel}
+            </span>
+            <span style={{ fontSize: "0.58rem", fontWeight: 700, color: peLabelColor, background: `${peLabelColor}18`, borderRadius: 3, padding: "1px 4px" }}>
+              PE {peLabel}
+            </span>
+          </div>
         )}
         {pcr != null && (
-          <div style={{ fontSize: "0.67rem", color: DIM, marginTop: 1 }}>
+          <div style={{ fontSize: "0.65rem", color: DIM, marginTop: 1 }}>
             PCR: <span style={{ color: pcr > 1 ? GREEN : pcr < 0.7 ? RED : TEXT, fontWeight: 600 }}>{pcr.toFixed(2)}</span>
           </div>
         )}
@@ -217,7 +235,7 @@ export function NiftyATMEntry({ accessToken }) {
   const [orderType, setOrderType]     = useState("MARKET");
   const [limitPrice, setLimitPrice]   = useState("");
   const [product, setProduct]         = useState("I"); // I = intraday MIS
-  const [strikeRange, setStrikeRange] = useState(200); // how many points from ATM to show (100/150/200/all)
+  const [strikeRange, setStrikeRange] = useState(250); // default: 5 OTM + ATM + 5 ITM = 11 rows
 
   // confirm modal
   const [pendingOrder, setPendingOrder] = useState(null);
@@ -463,10 +481,11 @@ export function NiftyATMEntry({ accessToken }) {
               color: TEXT, padding: "6px 10px", fontSize: "0.8rem", cursor: "pointer",
             }}
           >
-            <option value={50}>ATM ±1 (50 pts)</option>
-            <option value={100}>ATM ±2 (100 pts)</option>
-            <option value={150}>ATM ±3 (150 pts)</option>
-            <option value={200}>ATM ±4 (200 pts)</option>
+            <option value={50}>ATM ±1  (OTM1 / ITM1)</option>
+            <option value={100}>ATM ±2  (OTM2 / ITM2)</option>
+            <option value={150}>ATM ±3  (OTM3 / ITM3)</option>
+            <option value={200}>ATM ±4  (OTM4 / ITM4)</option>
+            <option value={250}>ATM ±5  (OTM5 / ITM5) — 11 rows</option>
             <option value={9999}>All</option>
           </select>
         </div>
@@ -549,6 +568,7 @@ export function NiftyATMEntry({ accessToken }) {
                     ce={byStrike[strike]?.CE}
                     pe={byStrike[strike]?.PE}
                     isATM={strike === atm_strike}
+                    atmStrike={atm_strike}
                     maxCeOI={maxCeOI}
                     maxPeOI={maxPeOI}
                     lots={lots}
