@@ -11,6 +11,7 @@ import { PivotCalculatorPage } from "./components/PivotCalculatorPage";
 import { NiftyATMEntry } from "./components/NiftyATMEntry";
 import { SensexOptionChain } from "./components/SensexOptionChain";
 import { NiftyFutureChart }  from "./components/NiftyFutureChart";
+import { AwsCostAnalysisPage } from "./components/AwsCostAnalysisPage";
 
 class TabErrorBoundary extends React.Component {
   state = { hasError: false, error: null };
@@ -370,6 +371,18 @@ function App() {
             >
               NF Chart
             </button>
+            <button
+              type="button"
+              onClick={() => setActivePage("aws-cost")}
+              style={{
+                padding: "6px 10px",
+                fontSize: "0.72rem",
+                background: activePage === "aws-cost" ? "rgba(255,152,0,0.22)" : "rgba(255,255,255,0.08)",
+                border: activePage === "aws-cost" ? "1px solid rgba(255,152,0,0.45)" : "1px solid rgba(255,255,255,0.16)",
+              }}
+            >
+              AWS Cost
+            </button>
           </div>
         </div>
 
@@ -442,6 +455,10 @@ function App() {
             <div style={{ flex: 1, minHeight: 0, height: "calc(100vh - 52px)", position: "relative" }}>
               <NiftyFutureChart accessToken={accessToken} />
             </div>
+          </TabErrorBoundary>
+        ) : activePage === "aws-cost" ? (
+          <TabErrorBoundary>
+            <AwsCostAnalysisPage />
           </TabErrorBoundary>
         ) : (
           <>

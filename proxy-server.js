@@ -1883,6 +1883,94 @@ if (IS_PROD) {
   }
 }
 
+// ── AWS Cost Analysis API ─────────────────────────────────────────────────────
+// GET /api/aws/costs?period=current|last|3months
+import { CostExplorerClient, GetCostAndUsageCommand } from "@aws-sdk/client-cost-explorer";
+
+const ceClient = new CostExplorerClient({ region: "us-east-1" }); // Cost Explorer is global, must use us-east-1
+
+function getDateRange(period) {
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const fmt = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+  if (period === "last") {
+    const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const end   = new Date(now.getFullYear(), now.getMonth(), 1);
+    return { start: fmt(start), end: fmt(end) };
+  }
+  if (period === "3months") {
+    const start = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+    const end   = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    return { start: fmt(start), end: fmt(end) };
+  }
+  // current (default)
+  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  // end must be tomorrow at latest (Cost Explorer won't accept future dates beyond today)
+  const tomorrow = new Date(now);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  return { start: fmt(start), end: fmt(tomorrow) };
+}
+
+app.get("/api/aws/costs", async (req, res) => {
+  try {
+    const period = req.query.period || "current";
+    const { start, end } = getDateRange(period);
+
+    const [byService, daily] = await Promise.all([
+      // Cost by service for the period
+      ceClient.send(new GetCostAndUsageCommand({
+        TimePeriod: { Start: start, End: end },
+        Granularity: "MONTHLY",
+        Metrics: ["UnblendedCost"],
+        GroupBy: [{ Type: "DIMENSION", Key: "SERVICE" }],
+      })),
+      // Daily total for current/last month only
+      period !== "3months"
+        ? ceClient.send(new GetCostAndUsageCommand({
+            TimePeriod: { Start: start, End: end },
+            Granularity: "DAILY",
+            Metrics: ["UnblendedCost"],
+          }))
+        : Promise.resolve(null),
+    ]);
+
+    // Aggregate service costs across all monthly result periods
+    const serviceMap = {};
+    for (const result of byService.ResultsByTime || []) {
+      for (const group of result.Groups || []) {
+        const name = group.Keys?.[0] || "Other";
+        const amount = parseFloat(group.Metrics?.UnblendedCost?.Amount || 0);
+        serviceMap[name] = (serviceMap[name] || 0) + amount;
+      }
+    }
+    const services = Object.entries(serviceMap)
+      .map(([name, cost]) => ({ name, cost: +cost.toFixed(4) }))
+      .sort((a, b) => b.cost - a.cost);
+
+    const totalCost = services.reduce((s, r) => s + r.cost, 0);
+
+    // Daily breakdown
+    const dailyRows = (daily?.ResultsByTime || []).map((r) => ({
+      date: r.TimePeriod?.Start,
+      cost: +parseFloat(r.Total?.UnblendedCost?.Amount || 0).toFixed(4),
+    }));
+
+    res.json({
+      status: "success",
+      period,
+      dateRange: { start, end },
+      totalCost: +totalCost.toFixed(4),
+      currency: byService.ResultsByTime?.[0]?.Groups?.[0]?.Metrics?.UnblendedCost?.Unit || "USD",
+      services,
+      daily: dailyRows,
+    });
+  } catch (err) {
+    console.error("[AWS Costs] Error:", err.message);
+    res.status(500).json({ status: "error", error: err.message });
+  }
+});
+
 // ── Future OI History API ─────────────────────────────────────────────────────
 // GET /api/oi/latest              → latest snapshot for all 3 futures
 // GET /api/oi/history?symbol=NIFTY&date=2025-06-16&limit=100
