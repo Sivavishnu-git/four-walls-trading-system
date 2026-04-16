@@ -8,6 +8,7 @@ import { OrderPlacementPanel } from "./components/OrderPlacementPanel";
 import { McxSandboxOrderPage } from "./components/McxSandboxOrderPage";
 import { OrderAnalysisPage } from "./components/OrderAnalysisPage";
 import { PivotCalculatorPage } from "./components/PivotCalculatorPage";
+import { NiftyATMEntry } from "./components/NiftyATMEntry";
 
 class TabErrorBoundary extends React.Component {
   state = { hasError: false, error: null };
@@ -331,6 +332,18 @@ function App() {
             >
               Pivot Calculator
             </button>
+            <button
+              type="button"
+              onClick={() => setActivePage("atm-entry")}
+              style={{
+                padding: "6px 10px",
+                fontSize: "0.72rem",
+                background: activePage === "atm-entry" ? "rgba(38,166,154,0.22)" : "rgba(255,255,255,0.08)",
+                border: activePage === "atm-entry" ? "1px solid rgba(38,166,154,0.45)" : "1px solid rgba(255,255,255,0.16)",
+              }}
+            >
+              ATM Entry
+            </button>
           </div>
         </div>
 
@@ -389,6 +402,10 @@ function App() {
         ) : activePage === "pivot" ? (
           <TabErrorBoundary>
             <PivotCalculatorPage accessToken={accessToken} />
+          </TabErrorBoundary>
+        ) : activePage === "atm-entry" ? (
+          <TabErrorBoundary>
+            <NiftyATMEntry accessToken={accessToken} />
           </TabErrorBoundary>
         ) : (
           <>
