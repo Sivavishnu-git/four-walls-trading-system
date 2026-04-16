@@ -1,822 +1,436 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { apiFetch } from "../api/client.js";
 import { computeIntradayPivots } from "../utils/intradayPivots.js";
 
-// ── constants ────────────────────────────────────────────────────────────────
-const CAPTURE_START_H = 9;
-const CAPTURE_START_M = 15;
-const CAPTURE_END_H = 9;
-const CAPTURE_END_M = 30;
-const POLL_MS = 3000; // 3-second polling during capture window
+// ── helpers ──────────────────────────────────────────────────────────────────
+function fmt(n) {
+  if (n == null || !Number.isFinite(Number(n))) return "—";
+  return Number(n).toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
 
-function toMinutes(h, m) {
+function nowISTMinutes() {
+  const now = new Date();
+  const ist = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kolkata",
+    hour: "numeric",
+    minute: "numeric",
+    hour12: false,
+  }).formatToParts(now);
+  const h = Number(ist.find((p) => p.type === "hour")?.value ?? 0);
+  const m = Number(ist.find((p) => p.type === "minute")?.value ?? 0);
   return h * 60 + m;
 }
 
-function nowMinutes() {
-  const d = new Date();
-  return toMinutes(d.getHours(), d.getMinutes()) + d.getSeconds() / 60;
-}
-
-const START_MIN = toMinutes(CAPTURE_START_H, CAPTURE_START_M);
-const END_MIN = toMinutes(CAPTURE_END_H, CAPTURE_END_M);
-
 function getPhase() {
-  const now = nowMinutes();
-  if (now < START_MIN) return "before";
-  if (now <= END_MIN) return "capturing";
-  return "done";
-}
-
-function pad2(n) {
-  return String(n).padStart(2, "0");
-}
-
-function formatCountdown(seconds) {
-  if (seconds <= 0) return "00:00";
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${pad2(m)}:${pad2(s)}`;
-}
-
-function fmt(n) {
-  if (n == null || !Number.isFinite(n)) return "—";
-  return n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const min = nowISTMinutes();
+  if (min < 9 * 60 + 15) return "before";   // before 09:15
+  if (min < 9 * 60 + 30) return "forming";   // 09:15–09:29 (candle building)
+  return "complete";                          // 09:30+ (candle is final)
 }
 
 // ── styles ───────────────────────────────────────────────────────────────────
-const BG = "#131722";
-const CARD = "#1a1f2e";
+const BG     = "#131722";
+const CARD   = "#1a1f2e";
 const BORDER = "#2a2e39";
-const TEXT = "#d1d4dc";
-const DIM = "#787b86";
-const GREEN = "#26a69a";
-const RED = "#ef5350";
-const BLUE = "#2962ff";
+const TEXT   = "#d1d4dc";
+const DIM    = "#787b86";
+const GREEN  = "#26a69a";
+const RED    = "#ef5350";
+const BLUE   = "#2962ff";
 const YELLOW = "#ffc107";
 const PURPLE = "#9c27b0";
+const ORANGE = "#ff7043";
 
-const cardStyle = {
+const card = {
   background: CARD,
   border: `1px solid ${BORDER}`,
   borderRadius: 10,
   padding: "16px 20px",
 };
 
-const labelStyle = {
-  fontSize: "0.7rem",
+const label = {
+  fontSize: "0.68rem",
   color: DIM,
   fontWeight: 600,
   textTransform: "uppercase",
-  letterSpacing: "0.05em",
+  letterSpacing: "0.06em",
   marginBottom: 4,
 };
 
-const valueStyle = {
-  fontFamily: "ui-monospace, monospace",
-  fontSize: "1.15rem",
-  fontWeight: 700,
-  color: TEXT,
-};
-
-function PivotRow({ label, value, color, ltp }) {
-  const isActive =
-    ltp != null &&
-    Number.isFinite(ltp) &&
-    Number.isFinite(value) &&
-    Math.abs(ltp - value) < (value * 0.002); // within 0.2%
+// ── pivot row ─────────────────────────────────────────────────────────────────
+function PivotRow({ name, value, color, ltp, isCenter }) {
+  const near =
+    ltp != null && Number.isFinite(value) && Math.abs(ltp - value) / value < 0.002;
 
   return (
     <div
       style={{
         display: "flex",
         alignItems: "center",
-        justifyContent: "space-between",
-        padding: "10px 16px",
+        padding: isCenter ? "12px 16px" : "9px 16px",
         borderRadius: 7,
-        background: isActive ? `${color}18` : "transparent",
-        border: isActive ? `1px solid ${color}55` : `1px solid transparent`,
+        background: near
+          ? `${color}18`
+          : isCenter
+          ? `${color}10`
+          : "transparent",
+        border: near
+          ? `1px solid ${color}66`
+          : isCenter
+          ? `1px solid ${color}44`
+          : "1px solid transparent",
         transition: "background 0.3s",
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div
-          style={{
-            width: 3,
-            height: 24,
-            borderRadius: 2,
-            background: color,
-          }}
-        />
-        <span style={{ fontWeight: 700, color, fontSize: "0.88rem", minWidth: 32 }}>
-          {label}
-        </span>
-      </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        {ltp != null && Number.isFinite(value) && (
-          <span
-            style={{
-              fontSize: "0.72rem",
-              color: ltp >= value ? GREEN : RED,
-              fontWeight: 600,
-            }}
-          >
-            {ltp >= value ? `+${fmt(ltp - value)}` : `-${fmt(value - ltp)}`}
-          </span>
-        )}
+      {/* color bar */}
+      <div
+        style={{
+          width: 3,
+          height: isCenter ? 28 : 20,
+          borderRadius: 2,
+          background: color,
+          marginRight: 12,
+          flexShrink: 0,
+        }}
+      />
+
+      {/* label */}
+      <span
+        style={{
+          fontWeight: 800,
+          color,
+          fontSize: isCenter ? "0.92rem" : "0.82rem",
+          minWidth: 34,
+        }}
+      >
+        {name}
+      </span>
+
+      <div style={{ flex: 1 }} />
+
+      {/* distance from LTP */}
+      {ltp != null && Number.isFinite(value) && (
         <span
           style={{
+            fontSize: "0.72rem",
+            fontWeight: 600,
+            color: ltp >= value ? GREEN : RED,
+            marginRight: 14,
             fontFamily: "ui-monospace, monospace",
-            fontSize: "1.05rem",
-            fontWeight: 700,
-            color: TEXT,
           }}
         >
-          {fmt(value)}
+          {ltp >= value ? "+" : "-"}
+          {fmt(Math.abs(ltp - value))}
         </span>
-      </div>
+      )}
+
+      {/* value */}
+      <span
+        style={{
+          fontFamily: "ui-monospace, monospace",
+          fontSize: isCenter ? "1.1rem" : "1rem",
+          fontWeight: 800,
+          color: isCenter ? "#fff" : TEXT,
+        }}
+      >
+        {fmt(value)}
+      </span>
     </div>
   );
 }
 
-// ── main component ───────────────────────────────────────────────────────────
+// ── main ─────────────────────────────────────────────────────────────────────
 export function PivotCalculatorPage({ accessToken }) {
-  // instrument selection
-  const [atmOptions, setAtmOptions] = useState([]);
-  const [optionsLoading, setOptionsLoading] = useState(false);
-  const [optionsError, setOptionsError] = useState(null);
-  const [selectedKey, setSelectedKey] = useState("");
-  const [customKey, setCustomKey] = useState("");
-  const [useCustom, setUseCustom] = useState(false);
+  const [phase, setPhase]           = useState(getPhase());
+  const [loading, setLoading]       = useState(false);
+  const [error, setError]           = useState(null);
+  const [lastFetch, setLastFetch]   = useState(null);
 
-  // capture state
-  const [phase, setPhase] = useState(getPhase());
-  const [countdown, setCountdown] = useState(0);
-  const [ohlc, setOhlc] = useState({ open: null, high: null, low: null, close: null });
-  const [pivots, setPivots] = useState(null);
-  const [ltp, setLtp] = useState(null);
-  const [ltpSymbol, setLtpSymbol] = useState("");
-  const [capturing, setCapturing] = useState(false);
-  const [lastTick, setLastTick] = useState(null);
-  const [tickCount, setTickCount] = useState(0);
-  const [pollError, setPollError] = useState(null);
+  const [futureLabel, setFutureLabel] = useState("");
+  const [ohlc, setOhlc]             = useState(null);   // { open, high, low, close, volume }
+  const [pivots, setPivots]         = useState(null);
+  const [ltp, setLtp]               = useState(null);
+  const [ltpOI, setLtpOI]          = useState(null);
 
-  // manual override
-  const [manualO, setManualO] = useState("");
-  const [manualH, setManualH] = useState("");
-  const [manualL, setManualL] = useState("");
-  const [manualC, setManualC] = useState("");
+  const timerRef = useRef(null);
 
-  const ohlcRef = useRef({ open: null, high: null, low: null, close: null });
-  const captureActiveRef = useRef(false);
-  const pollRef = useRef(null);
-
-  // ── load ATM options ────────────────────────────────────────────────────
+  // ── phase clock (1s) ─────────────────────────────────────────────────────
   useEffect(() => {
-    if (!accessToken) return;
-    setOptionsLoading(true);
-    apiFetch("/api/atm-options", { accessToken })
-      .then((r) => r.json())
-      .then((json) => {
-        const opts = [];
-        if (json.CE?.instrument_key) {
-          opts.push({
-            key: json.CE.instrument_key,
-            label: `${json.CE.trading_symbol || "ATM CE"} (CE)`,
-          });
-        }
-        if (json.PE?.instrument_key) {
-          opts.push({
-            key: json.PE.instrument_key,
-            label: `${json.PE.trading_symbol || "ATM PE"} (PE)`,
-          });
-        }
-        setAtmOptions(opts);
-        if (opts.length > 0 && !selectedKey) setSelectedKey(opts[0].key);
-        setOptionsLoading(false);
-      })
-      .catch((e) => {
-        setOptionsError(e.message);
-        setOptionsLoading(false);
-      });
-  }, [accessToken]);
-
-  const activeKey = useCustom ? customKey.trim() : selectedKey;
-
-  // ── phase clock ─────────────────────────────────────────────────────────
-  useEffect(() => {
-    const tick = () => {
-      const p = getPhase();
-      setPhase(p);
-      const now = nowMinutes();
-      if (p === "before") {
-        const secLeft = Math.ceil((START_MIN - now) * 60);
-        setCountdown(secLeft);
-      } else if (p === "capturing") {
-        const secLeft = Math.ceil((END_MIN - now) * 60);
-        setCountdown(secLeft);
-      } else {
-        setCountdown(0);
-      }
-    };
-    tick();
-    const id = setInterval(tick, 1000);
+    const id = setInterval(() => setPhase(getPhase()), 10_000);
     return () => clearInterval(id);
   }, []);
 
-  // ── polling logic ────────────────────────────────────────────────────────
-  const fetchTick = useCallback(async () => {
-    if (!activeKey || !accessToken) return;
+  // ── fetch trade-setup ─────────────────────────────────────────────────────
+  async function load() {
+    if (!accessToken) return;
+    setLoading(true);
+    setError(null);
     try {
-      const res = await apiFetch(
-        `/api/quotes?instrument_keys=${encodeURIComponent(activeKey)}`,
-        { accessToken }
-      );
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const res  = await apiFetch("/api/trade-setup", { accessToken });
       const json = await res.json();
-      if (!json?.data) return;
 
-      const quote =
-        json.data[activeKey] ||
-        Object.values(json.data)[0];
-      if (!quote) return;
-
-      const price = quote.last_price ?? quote.ltp;
-      if (!Number.isFinite(price) || price <= 0) return;
-
-      const sym = quote.symbol || activeKey.split(":")[1] || activeKey;
-      setLtp(price);
-      setLtpSymbol(sym);
-      setLastTick(new Date().toLocaleTimeString("en-IN"));
-      setTickCount((c) => c + 1);
-      setPollError(null);
-
-      // accumulate OHLC only during capture window
-      if (captureActiveRef.current) {
-        const prev = ohlcRef.current;
-        const next = {
-          open: prev.open == null ? price : prev.open,
-          high: prev.high == null ? price : Math.max(prev.high, price),
-          low: prev.low == null ? price : Math.min(prev.low, price),
-          close: price,
-        };
-        ohlcRef.current = next;
-        setOhlc({ ...next });
+      if (!res.ok || json.status === "error") {
+        throw new Error(json.error || json.message || `HTTP ${res.status}`);
       }
+
+      const { future, opening_15m_ohlc, live } = json.data ?? {};
+
+      // ── future label ────────────────────────────────────────────────────
+      if (future) {
+        setFutureLabel(future.display_name || future.trading_symbol || "Nifty Future");
+      }
+
+      // ── live LTP + OI ───────────────────────────────────────────────────
+      if (live) {
+        setLtp(live.ltp ?? live.last_price ?? null);
+        setLtpOI(live.oi ?? null);
+      }
+
+      // ── 15-min opening candle OHLC ──────────────────────────────────────
+      if (opening_15m_ohlc) {
+        const { open, high, low, close, volume } = opening_15m_ohlc;
+        setOhlc({ open, high, low, close, volume });
+        const result = computeIntradayPivots(open, high, low, close);
+        if (result) setPivots(result);
+      } else {
+        // Candle not yet available (pre-market or API gap)
+        setOhlc(null);
+        setPivots(null);
+      }
+
+      setLastFetch(new Date().toLocaleTimeString("en-IN"));
     } catch (e) {
-      setPollError(e.message);
+      setError(e.message);
+    } finally {
+      setLoading(false);
     }
-  }, [activeKey, accessToken]);
+  }
 
-  // manage polling lifecycle based on phase + activeKey
+  // ── auto-refresh ─────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!activeKey || !accessToken) return;
+    if (!accessToken) return;
+    load();
 
-    const startPolling = () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-      fetchTick();
-      pollRef.current = setInterval(fetchTick, POLL_MS);
-    };
+    // Refresh every 60s after 09:30 (candle is final); every 15s while forming
+    const interval = phase === "forming" ? 15_000 : 60_000;
+    timerRef.current = setInterval(load, interval);
+    return () => clearInterval(timerRef.current);
+  }, [accessToken, phase]);
 
-    const stopPolling = () => {
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
-      }
-    };
-
-    if (phase === "capturing") {
-      captureActiveRef.current = true;
-      setCapturing(true);
-      startPolling();
-    } else if (phase === "done") {
-      captureActiveRef.current = false;
-      setCapturing(false);
-      // keep polling to show live LTP vs pivots
-      startPolling();
-      // compute pivots once from captured OHLC
-      const { open, high, low, close } = ohlcRef.current;
-      if (open != null && high != null && low != null && close != null) {
-        setPivots(computeIntradayPivots(open, high, low, close));
-      }
-    } else {
-      // before
-      captureActiveRef.current = false;
-      setCapturing(false);
-      stopPolling();
-    }
-
-    return stopPolling;
-  }, [phase, activeKey, accessToken, fetchTick]);
-
-  // ── manual pivot recalculation ──────────────────────────────────────────
-  function recalcManual() {
-    const o = parseFloat(manualO);
-    const h = parseFloat(manualH);
-    const l = parseFloat(manualL);
-    const c = parseFloat(manualC);
-    if ([o, h, l, c].every(Number.isFinite)) {
-      const result = computeIntradayPivots(o, h, l, c);
-      setPivots(result);
-      ohlcRef.current = { open: o, high: h, low: l, close: c };
-      setOhlc({ open: o, high: h, low: l, close: c });
-    }
-  }
-
-  function resetCapture() {
-    ohlcRef.current = { open: null, high: null, low: null, close: null };
-    setOhlc({ open: null, high: null, low: null, close: null });
-    setPivots(null);
-    setTickCount(0);
-    setLastTick(null);
-  }
-
-  // ── render ───────────────────────────────────────────────────────────────
-  const displayOhlc = ohlc;
-  const canComputeFromCapture =
-    displayOhlc.open != null &&
-    displayOhlc.high != null &&
-    displayOhlc.low != null &&
-    displayOhlc.close != null;
+  // ── render ────────────────────────────────────────────────────────────────
+  const phaseMeta = {
+    before:   { color: YELLOW, dot: YELLOW, text: "Market not open yet — waiting for 09:15 IST" },
+    forming:  { color: GREEN,  dot: GREEN,  text: "Candle forming — 09:15 → 09:29 IST (refreshes every 15s)" },
+    complete: { color: BLUE,   dot: BLUE,   text: "Candle complete — pivots are final for today" },
+  }[phase];
 
   return (
     <div
       style={{
         background: BG,
         minHeight: "100%",
-        padding: "20px 16px",
+        padding: "20px 16px 40px",
         boxSizing: "border-box",
-        fontFamily: "'Inter', 'Segoe UI', sans-serif",
+        fontFamily: "'Inter','Segoe UI',sans-serif",
         color: TEXT,
+        maxWidth: 760,
+        margin: "0 auto",
       }}
     >
-      {/* ── header ────────────────────────────────────────────────────────── */}
+      {/* ── header ──────────────────────────────────────────────────────── */}
       <div style={{ marginBottom: 20 }}>
-        <h2
-          style={{
-            margin: 0,
-            fontSize: "1.15rem",
-            fontWeight: 700,
-            color: "#fff",
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-          }}
-        >
-          <span
-            style={{
-              background: `${PURPLE}22`,
-              border: `1px solid ${PURPLE}55`,
-              borderRadius: 6,
-              padding: "3px 10px",
-              fontSize: "0.72rem",
-              fontWeight: 700,
-              color: PURPLE,
-              textTransform: "uppercase",
-              letterSpacing: "0.08em",
-            }}
-          >
+        <h2 style={{ margin: 0, fontSize: "1.1rem", fontWeight: 700, color: "#fff", display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{
+            background: `${PURPLE}22`, border: `1px solid ${PURPLE}55`,
+            borderRadius: 6, padding: "2px 10px",
+            fontSize: "0.7rem", fontWeight: 700, color: PURPLE,
+            textTransform: "uppercase", letterSpacing: "0.08em",
+          }}>
             Pivot
           </span>
           Opening Range Pivot Calculator
         </h2>
-        <p style={{ margin: "6px 0 0", fontSize: "0.8rem", color: DIM }}>
-          Tracks live option price from 09:15 → 09:30 and computes intraday pivot levels.
+        <p style={{ margin: "5px 0 0", fontSize: "0.78rem", color: DIM, lineHeight: 1.5 }}>
+          Uses the Nifty Future 15-minute candle O / H / L / C (Open at 09:15, Close at 09:30 IST)
+          to compute intraday pivot levels PP · R1 · R2 · R3 · S1 · S2 · S3.
         </p>
       </div>
 
-      {/* ── instrument selector ────────────────────────────────────────────── */}
-      <div style={{ ...cardStyle, marginBottom: 16 }}>
-        <div style={{ marginBottom: 12, fontSize: "0.78rem", fontWeight: 700, color: TEXT }}>
-          Select Option Instrument
-        </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-start" }}>
-          <div style={{ flex: "1 1 220px" }}>
-            <div style={labelStyle}>ATM Option</div>
-            {optionsLoading ? (
-              <span style={{ color: DIM, fontSize: "0.8rem" }}>Loading ATM options…</span>
-            ) : optionsError ? (
-              <span style={{ color: RED, fontSize: "0.8rem" }}>Error: {optionsError}</span>
-            ) : (
-              <select
-                value={selectedKey}
-                onChange={(e) => {
-                  setSelectedKey(e.target.value);
-                  setUseCustom(false);
-                  resetCapture();
-                }}
-                style={{
-                  width: "100%",
-                  background: "#0d1117",
-                  border: `1px solid ${BORDER}`,
-                  borderRadius: 6,
-                  color: TEXT,
-                  padding: "7px 10px",
-                  fontSize: "0.85rem",
-                }}
-              >
-                {atmOptions.length === 0 && (
-                  <option value="">— No options loaded —</option>
-                )}
-                {atmOptions.map((o) => (
-                  <option key={o.key} value={o.key}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
-
-          <div style={{ flex: "1 1 280px" }}>
-            <div style={labelStyle}>Custom Instrument Key (optional)</div>
-            <div style={{ display: "flex", gap: 6 }}>
-              <input
-                type="text"
-                placeholder="e.g. NSE_FO|56482"
-                value={customKey}
-                onChange={(e) => setCustomKey(e.target.value)}
-                style={{
-                  flex: 1,
-                  background: "#0d1117",
-                  border: `1px solid ${useCustom ? BLUE : BORDER}`,
-                  borderRadius: 6,
-                  color: TEXT,
-                  padding: "7px 10px",
-                  fontSize: "0.85rem",
-                }}
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  if (customKey.trim()) {
-                    setUseCustom(true);
-                    resetCapture();
-                  }
-                }}
-                style={{
-                  padding: "7px 14px",
-                  background: useCustom ? `${BLUE}33` : "rgba(255,255,255,0.07)",
-                  border: `1px solid ${useCustom ? BLUE : BORDER}`,
-                  borderRadius: 6,
-                  color: useCustom ? BLUE : DIM,
-                  fontSize: "0.8rem",
-                  fontWeight: 600,
-                  cursor: "pointer",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                Use Custom
-              </button>
-            </div>
-          </div>
+      {/* ── status bar ──────────────────────────────────────────────────── */}
+      <div style={{ ...card, marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{
+            width: 8, height: 8, borderRadius: "50%",
+            background: phaseMeta.dot, display: "inline-block",
+            animation: phase === "forming" ? "pulse 1.2s infinite" : "none",
+          }} />
+          <span style={{ fontSize: "0.82rem", color: phaseMeta.color, fontWeight: 600 }}>
+            {phaseMeta.text}
+          </span>
         </div>
 
-        {activeKey && (
-          <div
-            style={{
-              marginTop: 10,
-              fontSize: "0.72rem",
-              color: DIM,
-              fontFamily: "ui-monospace, monospace",
-            }}
-          >
-            Active: <span style={{ color: GREEN }}>{activeKey}</span>
-          </div>
-        )}
-      </div>
-
-      {/* ── phase status ──────────────────────────────────────────────────── */}
-      <div
-        style={{
-          ...cardStyle,
-          marginBottom: 16,
-          display: "flex",
-          flexWrap: "wrap",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 12,
-        }}
-      >
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          {/* phase badge */}
-          {phase === "before" && (
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 7,
-                padding: "6px 14px",
-                borderRadius: 20,
-                background: "rgba(255,193,7,0.12)",
-                border: `1px solid ${YELLOW}55`,
-                color: YELLOW,
-                fontWeight: 700,
-                fontSize: "0.82rem",
-              }}
-            >
-              <span
-                style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: "50%",
-                  background: YELLOW,
-                  display: "inline-block",
-                }}
-              />
-              Waiting — market opens in {formatCountdown(countdown)}
-            </div>
+          {futureLabel && (
+            <span style={{ fontSize: "0.75rem", color: DIM, fontWeight: 600 }}>
+              {futureLabel}
+            </span>
           )}
-          {phase === "capturing" && (
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 7,
-                padding: "6px 14px",
-                borderRadius: 20,
-                background: "rgba(38,166,154,0.12)",
-                border: `1px solid ${GREEN}55`,
-                color: GREEN,
-                fontWeight: 700,
-                fontSize: "0.82rem",
-              }}
-            >
-              <span
-                style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: "50%",
-                  background: GREEN,
-                  display: "inline-block",
-                  animation: "pulse 1s infinite",
-                }}
-              />
-              Capturing 09:15 → 09:30 — {formatCountdown(countdown)} left
-            </div>
-          )}
-          {phase === "done" && (
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 7,
-                padding: "6px 14px",
-                borderRadius: 20,
-                background: `${BLUE}18`,
-                border: `1px solid ${BLUE}55`,
-                color: BLUE,
-                fontWeight: 700,
-                fontSize: "0.82rem",
-              }}
-            >
-              <span
-                style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: "50%",
-                  background: BLUE,
-                  display: "inline-block",
-                }}
-              />
-              Pivots locked — live LTP tracking
-            </div>
-          )}
-        </div>
-
-        {/* live LTP */}
-        {ltp != null && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: "0.72rem", color: DIM, fontWeight: 600 }}>LTP</span>
-            <span
-              style={{
-                fontFamily: "ui-monospace, monospace",
-                fontSize: "1.2rem",
-                fontWeight: 800,
-                color: "#fff",
-              }}
-            >
+          {ltp != null && (
+            <span style={{ fontFamily: "ui-monospace,monospace", fontSize: "1.05rem", fontWeight: 800, color: "#fff" }}>
+              <span style={{ fontSize: "0.68rem", color: DIM, marginRight: 5 }}>LTP</span>
               {fmt(ltp)}
             </span>
-            {ltpSymbol && (
-              <span style={{ fontSize: "0.72rem", color: DIM }}>{ltpSymbol}</span>
-            )}
-          </div>
-        )}
-
-        {(pollError) && (
-          <span style={{ fontSize: "0.75rem", color: RED }}>Poll error: {pollError}</span>
-        )}
-        {lastTick && (
-          <span style={{ fontSize: "0.7rem", color: DIM }}>
-            Last tick: {lastTick} ({tickCount} ticks)
-          </span>
-        )}
+          )}
+          {ltpOI != null && (
+            <span style={{ fontSize: "0.75rem", color: DIM, fontFamily: "ui-monospace,monospace" }}>
+              OI {Number(ltpOI).toLocaleString("en-IN")}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={load}
+            disabled={loading}
+            style={{
+              padding: "5px 12px",
+              background: loading ? "rgba(255,255,255,0.04)" : `${BLUE}22`,
+              border: `1px solid ${BLUE}44`,
+              borderRadius: 6, color: BLUE,
+              fontSize: "0.75rem", fontWeight: 700, cursor: loading ? "wait" : "pointer",
+            }}
+          >
+            {loading ? "Loading…" : "Refresh"}
+          </button>
+        </div>
       </div>
 
-      {/* ── OHLC capture display ──────────────────────────────────────────── */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
-          gap: 12,
-          marginBottom: 16,
-        }}
-      >
+      {/* ── error ───────────────────────────────────────────────────────── */}
+      {error && (
+        <div style={{
+          ...card, marginBottom: 14,
+          background: "rgba(239,83,80,0.08)", border: `1px solid ${RED}44`,
+          color: RED, fontSize: "0.82rem",
+        }}>
+          {error}
+        </div>
+      )}
+
+      {/* ── OHLC cards ──────────────────────────────────────────────────── */}
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+        gap: 10, marginBottom: 14,
+      }}>
         {[
-          { label: "Open (09:15)", value: displayOhlc.open, color: TEXT },
-          { label: "High", value: displayOhlc.high, color: GREEN },
-          { label: "Low", value: displayOhlc.low, color: RED },
-          { label: "Close (09:30)", value: displayOhlc.close, color: YELLOW },
-        ].map(({ label, value, color }) => (
-          <div key={label} style={cardStyle}>
-            <div style={labelStyle}>{label}</div>
-            <div style={{ ...valueStyle, color }}>
-              {value != null ? fmt(value) : <span style={{ color: DIM }}>—</span>}
+          { l: "Open  (09:15)",  v: ohlc?.open,   c: TEXT   },
+          { l: "High",           v: ohlc?.high,   c: GREEN  },
+          { l: "Low",            v: ohlc?.low,    c: RED    },
+          { l: "Close (09:30)", v: ohlc?.close,  c: YELLOW },
+        ].map(({ l, v, c }) => (
+          <div key={l} style={card}>
+            <div style={label}>{l}</div>
+            <div style={{ fontFamily: "ui-monospace,monospace", fontSize: "1.1rem", fontWeight: 800, color: c }}>
+              {v != null ? fmt(v) : <span style={{ color: DIM, fontSize: "0.85rem" }}>waiting…</span>}
             </div>
           </div>
         ))}
       </div>
 
-      {/* ── compute button (when done but no pivots yet) ──────────────────── */}
-      {phase === "done" && !pivots && canComputeFromCapture && (
-        <div style={{ marginBottom: 16 }}>
-          <button
-            type="button"
-            onClick={() => {
-              const { open, high, low, close } = ohlcRef.current;
-              setPivots(computeIntradayPivots(open, high, low, close));
-            }}
-            style={{
-              padding: "10px 22px",
-              background: `${GREEN}22`,
-              border: `1px solid ${GREEN}55`,
-              borderRadius: 8,
-              color: GREEN,
-              fontWeight: 700,
-              fontSize: "0.88rem",
-              cursor: "pointer",
-            }}
-          >
-            Compute Pivots from Captured OHLC
-          </button>
+      {ohlc?.volume != null && (
+        <div style={{ marginBottom: 14, fontSize: "0.72rem", color: DIM, textAlign: "right" }}>
+          Volume (09:15–09:30):{" "}
+          <span style={{ color: TEXT, fontFamily: "ui-monospace,monospace" }}>
+            {Number(ohlc.volume).toLocaleString("en-IN")}
+          </span>
+          {lastFetch && (
+            <span style={{ marginLeft: 14 }}>Last updated: {lastFetch}</span>
+          )}
         </div>
       )}
 
-      {/* ── pivot levels ─────────────────────────────────────────────────── */}
-      {pivots && (
-        <div style={{ ...cardStyle, marginBottom: 16 }}>
-          <div
-            style={{
+      {/* ── pivot table ─────────────────────────────────────────────────── */}
+      {pivots ? (
+        <div style={{ ...card }}>
+          <div style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            marginBottom: 12, flexWrap: "wrap", gap: 8,
+          }}>
+            <div style={{ fontWeight: 700, fontSize: "0.88rem", color: "#fff" }}>
+              Intraday Pivot Levels
+            </div>
+            <div style={{ fontSize: "0.68rem", color: DIM, fontFamily: "ui-monospace,monospace" }}>
+              Formula: PP = (O+H+L+C)/4
+            </div>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            <PivotRow name="R3" value={pivots.r3} color={RED}    ltp={ltp} />
+            <PivotRow name="R2" value={pivots.r2} color={ORANGE} ltp={ltp} />
+            <PivotRow name="R1" value={pivots.r1} color={YELLOW} ltp={ltp} />
+
+            {/* PP */}
+            <div style={{ margin: "4px 0" }}>
+              <PivotRow name="PP" value={pivots.pp} color={PURPLE} ltp={ltp} isCenter />
+            </div>
+
+            <PivotRow name="S1" value={pivots.s1} color="#80cbc4" ltp={ltp} />
+            <PivotRow name="S2" value={pivots.s2} color="#4db6ac" ltp={ltp} />
+            <PivotRow name="S3" value={pivots.s3} color={GREEN}   ltp={ltp} />
+          </div>
+
+          {/* LTP position indicator */}
+          {ltp != null && (
+            <div style={{
+              marginTop: 14,
+              padding: "8px 14px",
+              borderRadius: 7,
+              background: "rgba(255,255,255,0.04)",
+              border: `1px solid ${BORDER}`,
+              fontSize: "0.78rem",
+              color: DIM,
               display: "flex",
               alignItems: "center",
-              justifyContent: "space-between",
-              marginBottom: 14,
-              flexWrap: "wrap",
               gap: 8,
-            }}
-          >
-            <div style={{ fontWeight: 700, fontSize: "0.9rem", color: "#fff" }}>
-              Pivot Levels — 09:15–09:30 Opening Range
-            </div>
-            <div style={{ fontSize: "0.7rem", color: DIM }}>
-              O:{fmt(displayOhlc.open)} H:{fmt(displayOhlc.high)} L:{fmt(displayOhlc.low)} C:{fmt(displayOhlc.close)}
-            </div>
-          </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <PivotRow label="R3" value={pivots.r3} color={RED} ltp={ltp} />
-            <PivotRow label="R2" value={pivots.r2} color="#ff7043" ltp={ltp} />
-            <PivotRow label="R1" value={pivots.r1} color="#ffb74d" ltp={ltp} />
-
-            {/* PP separator */}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                padding: "10px 16px",
-                borderRadius: 7,
-                background: `${PURPLE}14`,
-                border: `1px solid ${PURPLE}44`,
-              }}
-            >
-              <div style={{ width: 3, height: 24, borderRadius: 2, background: PURPLE }} />
-              <span style={{ fontWeight: 700, color: PURPLE, fontSize: "0.88rem", minWidth: 32 }}>PP</span>
-              <div style={{ flex: 1 }} />
-              {ltp != null && Number.isFinite(pivots.pp) && (
-                <span
-                  style={{
-                    fontSize: "0.72rem",
-                    color: ltp >= pivots.pp ? GREEN : RED,
-                    fontWeight: 600,
-                  }}
-                >
-                  {ltp >= pivots.pp ? `+${fmt(ltp - pivots.pp)}` : `-${fmt(pivots.pp - ltp)}`}
-                </span>
-              )}
-              <span
-                style={{
-                  fontFamily: "ui-monospace, monospace",
-                  fontSize: "1.05rem",
-                  fontWeight: 800,
-                  color: "#fff",
-                }}
-              >
-                {fmt(pivots.pp)}
+            }}>
+              <span>Current LTP</span>
+              <span style={{ fontFamily: "ui-monospace,monospace", color: "#fff", fontWeight: 700 }}>
+                {fmt(ltp)}
               </span>
+              <span>is</span>
+              <span style={{ color: ltp >= pivots.pp ? GREEN : RED, fontWeight: 700 }}>
+                {ltp >= pivots.pp ? "ABOVE" : "BELOW"} PP
+              </span>
+              {(() => {
+                // Identify which zone LTP sits in
+                if (ltp >= pivots.r3) return <span style={{ color: RED }}>— above R3 (extreme resistance)</span>;
+                if (ltp >= pivots.r2) return <span style={{ color: ORANGE }}>— between R2 and R3</span>;
+                if (ltp >= pivots.r1) return <span style={{ color: YELLOW }}>— between R1 and R2</span>;
+                if (ltp >= pivots.pp) return <span style={{ color: GREEN }}>— between PP and R1</span>;
+                if (ltp >= pivots.s1) return <span style={{ color: "#80cbc4" }}>— between S1 and PP</span>;
+                if (ltp >= pivots.s2) return <span style={{ color: "#4db6ac" }}>— between S2 and S1</span>;
+                if (ltp >= pivots.s3) return <span style={{ color: GREEN }}>— between S3 and S2</span>;
+                return <span style={{ color: GREEN }}>— below S3 (extreme support)</span>;
+              })()}
             </div>
-
-            <PivotRow label="S1" value={pivots.s1} color="#80cbc4" ltp={ltp} />
-            <PivotRow label="S2" value={pivots.s2} color="#4db6ac" ltp={ltp} />
-            <PivotRow label="S3" value={pivots.s3} color={GREEN} ltp={ltp} />
-          </div>
+          )}
+        </div>
+      ) : !loading && !error && (
+        <div style={{
+          ...card,
+          textAlign: "center", color: DIM, fontSize: "0.85rem", padding: "32px",
+        }}>
+          {phase === "before"
+            ? "Opening range candle not yet available. Come back after 09:15 IST."
+            : "Fetching candle data from Upstox…"}
         </div>
       )}
-
-      {/* ── manual override ───────────────────────────────────────────────── */}
-      <div style={{ ...cardStyle }}>
-        <div
-          style={{
-            fontWeight: 700,
-            fontSize: "0.82rem",
-            color: TEXT,
-            marginBottom: 12,
-          }}
-        >
-          Manual Override — enter OHLC to recalculate
-        </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
-          {[
-            { label: "Open", val: manualO, set: setManualO },
-            { label: "High", val: manualH, set: setManualH },
-            { label: "Low", val: manualL, set: setManualL },
-            { label: "Close", val: manualC, set: setManualC },
-          ].map(({ label, val, set }) => (
-            <div key={label} style={{ flex: "1 1 100px" }}>
-              <div style={labelStyle}>{label}</div>
-              <input
-                type="number"
-                step="0.05"
-                value={val}
-                onChange={(e) => set(e.target.value)}
-                placeholder="0.00"
-                style={{
-                  width: "100%",
-                  boxSizing: "border-box",
-                  background: "#0d1117",
-                  border: `1px solid ${BORDER}`,
-                  borderRadius: 6,
-                  color: TEXT,
-                  padding: "7px 10px",
-                  fontSize: "0.9rem",
-                  fontFamily: "ui-monospace, monospace",
-                }}
-              />
-            </div>
-          ))}
-          <button
-            type="button"
-            onClick={recalcManual}
-            style={{
-              padding: "8px 18px",
-              background: `${PURPLE}22`,
-              border: `1px solid ${PURPLE}55`,
-              borderRadius: 7,
-              color: PURPLE,
-              fontWeight: 700,
-              fontSize: "0.85rem",
-              cursor: "pointer",
-              alignSelf: "flex-end",
-              whiteSpace: "nowrap",
-            }}
-          >
-            Calculate
-          </button>
-          <button
-            type="button"
-            onClick={resetCapture}
-            style={{
-              padding: "8px 14px",
-              background: "rgba(255,255,255,0.05)",
-              border: `1px solid ${BORDER}`,
-              borderRadius: 7,
-              color: DIM,
-              fontWeight: 600,
-              fontSize: "0.82rem",
-              cursor: "pointer",
-              alignSelf: "flex-end",
-              whiteSpace: "nowrap",
-            }}
-          >
-            Reset
-          </button>
-        </div>
-      </div>
 
       <style>{`
         @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.3; }
+          0%,100% { opacity:1; }
+          50%      { opacity:0.25; }
         }
       `}</style>
     </div>
