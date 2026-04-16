@@ -1025,7 +1025,11 @@ app.get("/api/atm-options", async (req, res) => {
     if (!spotPrice) return res.status(500).json({ error: "Could not get Nifty Future price" });
 
     const atm = Math.round(spotPrice / 50) * 50;
-    const nearStrikes = [atm - 100, atm - 50, atm, atm + 50, atm + 100];
+    const nearStrikes = [
+      atm - 200, atm - 150, atm - 100, atm - 50,
+      atm,
+      atm + 50, atm + 100, atm + 150, atm + 200,
+    ];
 
     const niftyOptions = instruments.filter(
       i => i.name === "NIFTY" && (i.instrument_type === "CE" || i.instrument_type === "PE")
@@ -1746,6 +1750,40 @@ if (IS_PROD) {
     console.log("Serving static frontend from dist/");
   }
 }
+
+// ── Telegram OI Alert ───────────────────────────────────────────────────────
+// POST /api/oi-alert   { barChange, oi, ltp, time }
+// Reads TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID from env and forwards a message.
+app.post("/api/oi-alert", async (req, res) => {
+  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId   = process.env.TELEGRAM_CHAT_ID;
+
+  if (!botToken || !chatId) {
+    return res.status(503).json({ error: "Telegram not configured. Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env" });
+  }
+
+  const { barChange = 0, oi = 0, ltp = 0, time = "" } = req.body || {};
+  const direction = barChange > 0 ? "▲ OI Added" : "▼ OI Unwound";
+  const sign      = barChange > 0 ? "+" : "";
+  const text =
+    `🚨 *OI Alert — ${direction}*\n` +
+    `Change: *${sign}${Number(barChange).toLocaleString("en-IN")}*\n` +
+    `OI: ${Number(oi).toLocaleString("en-IN")}\n` +
+    `LTP: ₹${Number(ltp).toFixed(2)}\n` +
+    `Time: ${time}`;
+
+  try {
+    await axios.post(
+      `https://api.telegram.org/bot${botToken}/sendMessage`,
+      { chat_id: chatId, text, parse_mode: "Markdown" },
+      { timeout: 8000 },
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Telegram alert failed:", err.message);
+    res.status(502).json({ error: err.message });
+  }
+});
 
 app.listen(PORT, () => {
   console.log(`Proxy Server V3 running on http://localhost:${PORT} [${IS_PROD ? "PRODUCTION" : "DEVELOPMENT"}]`);

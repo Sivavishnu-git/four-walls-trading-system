@@ -90,6 +90,8 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
     const [oiTrend5Min, setOiTrend5Min] = useState(null);
     const firstSessionOIRef = useRef(null);
     const intervalRef = useRef(null);
+    const prevCapturedOIRef = useRef(null);
+    const [oiAlerts, setOiAlerts] = useState([]);
 
     const [instrumentKey, setInstrumentKey] = useState(
         propInstrumentKey || import.meta.env.VITE_INSTRUMENT_KEY || "NSE_FO|51714",
@@ -163,6 +165,41 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
                 change: 0,
                 changePercent: 0,
             };
+
+            // Check bar-to-bar move BEFORE updating state (using ref tracking)
+            if (prevCapturedOIRef.current !== null) {
+                const barChange = oi - prevCapturedOIRef.current;
+                if (Math.abs(barChange) > 30000) {
+                    const alertTime = timestamp.toLocaleTimeString("en-IN", { hour12: false });
+                    const alertObj = {
+                        id: Date.now(),
+                        time: alertTime,
+                        barChange,
+                        oi,
+                        ltp,
+                    };
+                    setOiAlerts((prev) => [alertObj, ...prev].slice(0, 20));
+
+                    // Browser notification (desktop)
+                    if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+                        new Notification(
+                            `OI Alert: ${barChange > 0 ? "▲ Added" : "▼ Unwound"} ${Math.abs(barChange).toLocaleString("en-IN")}`,
+                            {
+                                body: `OI: ${oi.toLocaleString("en-IN")} | LTP: ₹${ltp.toFixed(2)} at ${alertTime}`,
+                                tag: "oi-alert",
+                            },
+                        );
+                    }
+
+                    // Telegram phone alert (fire-and-forget)
+                    apiFetch("/api/oi-alert", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ barChange, oi, ltp, time: alertTime }),
+                    }).catch(() => {/* silently ignore if Telegram not configured */});
+                }
+            }
+            prevCapturedOIRef.current = oi;
 
             setOiHistory((prev) => {
                 const updated = [...prev];
@@ -331,6 +368,9 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
         }
 
         console.log("Connecting with instrument:", instrumentKey);
+        if (typeof Notification !== "undefined" && Notification.permission === "default") {
+            Notification.requestPermission();
+        }
         setIsLive(true);
         connect();
     };
@@ -518,6 +558,98 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
 
             {/* NEW: Option Entry Planner */}
             {/* <OptionEntryPlanner /> */}
+
+            {/* OI Alert Banner */}
+            {oiAlerts.length > 0 && (
+                <div
+                    style={{
+                        margin: "0 16px 12px",
+                        borderRadius: 8,
+                        border: "1px solid rgba(255,152,0,0.45)",
+                        background: "rgba(255,152,0,0.08)",
+                        overflow: "hidden",
+                    }}
+                >
+                    <div
+                        style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            padding: "6px 12px",
+                            background: "rgba(255,152,0,0.15)",
+                            borderBottom: "1px solid rgba(255,152,0,0.3)",
+                        }}
+                    >
+                        <span style={{ color: "#ff9800", fontWeight: 700, fontSize: "0.82rem" }}>
+                            ⚠ OI Alerts — moves &gt; 30,000 ({oiAlerts.length})
+                        </span>
+                        <button
+                            type="button"
+                            onClick={() => setOiAlerts([])}
+                            style={{
+                                background: "none",
+                                border: "1px solid rgba(255,152,0,0.4)",
+                                color: "#ff9800",
+                                borderRadius: 4,
+                                padding: "2px 8px",
+                                fontSize: "0.72rem",
+                                cursor: "pointer",
+                            }}
+                        >
+                            Clear all
+                        </button>
+                    </div>
+                    <div style={{ maxHeight: 160, overflowY: "auto" }}>
+                        {oiAlerts.map((alert) => (
+                            <div
+                                key={alert.id}
+                                style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 12,
+                                    padding: "5px 12px",
+                                    borderBottom: "1px solid rgba(255,152,0,0.1)",
+                                    fontSize: "0.82rem",
+                                }}
+                            >
+                                <span
+                                    style={{
+                                        fontWeight: 700,
+                                        color: alert.barChange > 0 ? "#26a69a" : "#ef5350",
+                                        minWidth: 110,
+                                        fontFamily: "ui-monospace, monospace",
+                                    }}
+                                >
+                                    {alert.barChange > 0 ? "▲ +" : "▼ "}
+                                    {Math.abs(alert.barChange).toLocaleString("en-IN")}
+                                </span>
+                                <span style={{ color: "#888", minWidth: 64 }}>{alert.time}</span>
+                                <span style={{ color: "#ccc" }}>
+                                    OI: {alert.oi.toLocaleString("en-IN")}
+                                </span>
+                                <span style={{ color: "#aaa" }}>LTP: ₹{alert.ltp.toFixed(2)}</span>
+                                <button
+                                    type="button"
+                                    onClick={() =>
+                                        setOiAlerts((prev) => prev.filter((a) => a.id !== alert.id))
+                                    }
+                                    style={{
+                                        marginLeft: "auto",
+                                        background: "none",
+                                        border: "none",
+                                        color: "#666",
+                                        cursor: "pointer",
+                                        fontSize: "0.85rem",
+                                        lineHeight: 1,
+                                    }}
+                                >
+                                    ✕
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             {/* OI History Table */}
             <div className="history-section history-section-compact">
