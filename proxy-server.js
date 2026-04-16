@@ -1584,18 +1584,31 @@ app.get("/api/trade-setup", async (req, res) => {
     const todayIST = formatDateIST(new Date(nowMs));
     const fiveDaysAgoIST = formatDateIST(new Date(nowMs - 5 * 86400000));
 
-    // Fetch daily candles (for pivot), intraday 1m (multi-day for opening 15m + 5m agg), live quote
-    const [dailyRes, intradayRes, quoteRes] = await Promise.all([
+    // Fetch daily candles (for pivot), today's intraday 1m candles, live quote — all in parallel
+    const [dailyRes, intradayRes, intradayTodayRes, quoteRes] = await Promise.all([
       axios.get(`https://api.upstox.com/v2/historical-candle/${futKey}/day/${todayIST}/${fiveDaysAgoIST}`, {
         headers: { Authorization: accessToken, Accept: "application/json" }
       }).catch(e => ({ data: null, error: e.response?.data || e.message })),
+      // Historical 1m — previous sessions (historical endpoint excludes the live session)
       axios.get(`https://api.upstox.com/v2/historical-candle/${futKey}/1minute/${todayIST}/${fiveDaysAgoIST}`, {
+        headers: { Authorization: accessToken, Accept: "application/json" }
+      }).catch(e => ({ data: null, error: e.response?.data || e.message })),
+      // Today's live 1m candles — intraday endpoint (the only source for current session bars)
+      axios.get(`https://api.upstox.com/v2/historical-candle/intraday/${futKey}/1minute`, {
         headers: { Authorization: accessToken, Accept: "application/json" }
       }).catch(e => ({ data: null, error: e.response?.data || e.message })),
       axios.get(`https://api.upstox.com/v2/market-quote/quotes?instrument_key=${encodeURIComponent(futKey)}`, {
         headers: { Authorization: accessToken, Accept: "application/json" }
       }).catch(e => ({ data: null, error: e.response?.data || e.message })),
     ]);
+
+    // Merge: today's live 1m bars take priority over historical (deduplicate by timestamp)
+    const histCandles = intradayRes.data?.data?.candles || [];
+    const liveCandles = intradayTodayRes.data?.data?.candles || [];
+    const allCandleMap = new Map();
+    for (const c of histCandles) allCandleMap.set(c[0], c);
+    for (const c of liveCandles) allCandleMap.set(c[0], c);  // live overwrites stale historical
+    const allCandles = [...allCandleMap.values()].sort((a, b) => new Date(a[0]) - new Date(b[0]));
 
     // Previous day OHLC for pivots
     let pivots = null;
@@ -1624,10 +1637,9 @@ app.get("/api/trade-setup", async (req, res) => {
     // Intraday 1-min candles → aggregate to 5-min + opening 15m OHLC (9:15–9:29 IST, 15×1m)
     let fiveMinCandles = [];
     let opening15mOhlc = null;
-    if (intradayRes.data?.data?.candles) {
-      const sorted = intradayRes.data.data.candles.sort((a, b) => new Date(a[0]) - new Date(b[0]));
-      opening15mOhlc = buildOpening15mOhlc(sorted);
-      const sortedToday = sorted.filter((c) => formatDateIST(new Date(c[0])) === todayIST);
+    if (allCandles.length > 0) {
+      opening15mOhlc = buildOpening15mOhlc(allCandles);
+      const sortedToday = allCandles.filter((c) => formatDateIST(new Date(c[0])) === todayIST);
       for (let i = 0; i < sortedToday.length; i += 5) {
         const batch = sortedToday.slice(i, i + 5);
         if (batch.length === 0) continue;
