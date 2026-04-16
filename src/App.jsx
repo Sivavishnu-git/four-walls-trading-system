@@ -7,6 +7,7 @@ import { OIMonitor } from "./components/OIMonitor";
 import { OrderPlacementPanel } from "./components/OrderPlacementPanel";
 import { McxSandboxOrderPage } from "./components/McxSandboxOrderPage";
 import { OrderAnalysisPage } from "./components/OrderAnalysisPage";
+import { PivotCalculatorPage } from "./components/PivotCalculatorPage";
 
 class TabErrorBoundary extends React.Component {
   state = { hasError: false, error: null };
@@ -318,6 +319,18 @@ function App() {
             >
               Order Analysis
             </button>
+            <button
+              type="button"
+              onClick={() => setActivePage("pivot")}
+              style={{
+                padding: "6px 10px",
+                fontSize: "0.72rem",
+                background: activePage === "pivot" ? "rgba(156,33,176,0.22)" : "rgba(255,255,255,0.08)",
+                border: activePage === "pivot" ? "1px solid rgba(156,33,176,0.45)" : "1px solid rgba(255,255,255,0.16)",
+              }}
+            >
+              Pivot Calculator
+            </button>
           </div>
         </div>
 
@@ -372,6 +385,10 @@ function App() {
         ) : activePage === "analysis" ? (
           <TabErrorBoundary>
             <OrderAnalysisPage accessToken={accessToken} />
+          </TabErrorBoundary>
+        ) : activePage === "pivot" ? (
+          <TabErrorBoundary>
+            <PivotCalculatorPage accessToken={accessToken} />
           </TabErrorBoundary>
         ) : (
           <>
