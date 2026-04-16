@@ -9,6 +9,7 @@ import { McxSandboxOrderPage } from "./components/McxSandboxOrderPage";
 import { OrderAnalysisPage } from "./components/OrderAnalysisPage";
 import { PivotCalculatorPage } from "./components/PivotCalculatorPage";
 import { NiftyATMEntry } from "./components/NiftyATMEntry";
+import { SensexOptionChain } from "./components/SensexOptionChain";
 
 class TabErrorBoundary extends React.Component {
   state = { hasError: false, error: null };
@@ -344,6 +345,18 @@ function App() {
             >
               ATM Entry
             </button>
+            <button
+              type="button"
+              onClick={() => setActivePage("sensex")}
+              style={{
+                padding: "6px 10px",
+                fontSize: "0.72rem",
+                background: activePage === "sensex" ? "rgba(255,152,0,0.22)" : "rgba(255,255,255,0.08)",
+                border: activePage === "sensex" ? "1px solid rgba(255,152,0,0.45)" : "1px solid rgba(255,255,255,0.16)",
+              }}
+            >
+              Sensex Chain
+            </button>
           </div>
         </div>
 
@@ -406,6 +419,10 @@ function App() {
         ) : activePage === "atm-entry" ? (
           <TabErrorBoundary>
             <NiftyATMEntry accessToken={accessToken} />
+          </TabErrorBoundary>
+        ) : activePage === "sensex" ? (
+          <TabErrorBoundary>
+            <SensexOptionChain accessToken={accessToken} />
           </TabErrorBoundary>
         ) : (
           <>
