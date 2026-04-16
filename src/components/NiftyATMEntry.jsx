@@ -93,80 +93,114 @@ function ConfirmModal({ order, onConfirm, onCancel, loading }) {
   );
 }
 
-// ── option row ────────────────────────────────────────────────────────────────
-function OptionRow({ opt, isATM, lots, lotSize, orderType, limitPrice, product, onOrder }) {
-  const isCE   = opt.type === "CE";
-  const color  = isCE ? BLUE : RED;
-  const change = opt.change;
+// ── OI bar ───────────────────────────────────────────────────────────────────
+function OIBar({ oi, maxOI, color }) {
+  const pct = maxOI > 0 ? Math.min(100, (oi / maxOI) * 100) : 0;
+  return (
+    <div style={{ height: 3, background: "rgba(255,255,255,0.07)", borderRadius: 2, overflow: "hidden", marginTop: 3 }}>
+      <div style={{ width: `${pct}%`, height: "100%", background: color, borderRadius: 2, transition: "width 0.4s" }} />
+    </div>
+  );
+}
+
+// ── strike row (CE | Strike+PCR | PE) ────────────────────────────────────────
+function StrikeRow({ ce, pe, isATM, maxCeOI, maxPeOI, lots, orderType, limitPrice, product, onOrder, spotPrice, strike }) {
+  const pcr     = ce?.oi > 0 ? (pe?.oi || 0) / ce.oi : null;
+  const ceChPct = ce ? (ce.change / (ce.ltp - ce.change || 1)) * 100 : null;
+  const peChPct = pe ? (pe.change / (pe.ltp - pe.change || 1)) * 100 : null;
+
+  const sideStyle = (align) => ({
+    display: "flex",
+    flexDirection: "column",
+    alignItems: align,
+    justifyContent: "center",
+    gap: 2,
+    padding: "10px 10px",
+  });
 
   return (
     <div style={{
       display: "grid",
-      gridTemplateColumns: "90px 70px 70px 70px 80px 90px 90px",
-      alignItems: "center",
-      gap: 0,
-      padding: "10px 14px",
-      borderRadius: 7,
-      background: isATM ? `${YELLOW}0a` : "transparent",
-      border: isATM ? `1px solid ${YELLOW}33` : "1px solid transparent",
-      marginBottom: 2,
+      gridTemplateColumns: "1fr 110px 1fr",
+      borderBottom: `1px solid ${BORDER}`,
+      background: isATM ? `${YELLOW}08` : "transparent",
+      borderLeft: isATM ? `3px solid ${YELLOW}` : "3px solid transparent",
     }}>
-      {/* strike */}
-      <div style={{ fontFamily: "ui-monospace,monospace", fontWeight: isATM ? 800 : 600, color: isATM ? YELLOW : TEXT, fontSize: "0.88rem" }}>
-        {opt.strike}
-        {isATM && <span style={{ marginLeft: 5, fontSize: "0.6rem", color: YELLOW, fontWeight: 700, background: `${YELLOW}22`, borderRadius: 3, padding: "1px 4px" }}>ATM</span>}
+      {/* ── CE side (left, right-aligned) ── */}
+      <div style={{ ...sideStyle("flex-end"), borderRight: `1px solid ${BORDER}` }}>
+        {ce ? (
+          <>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <button type="button" onClick={() => onOrder(ce, "SELL")}
+                style={{ padding: "3px 7px", borderRadius: 4, cursor: "pointer", fontSize: "0.68rem", fontWeight: 700, background: `${RED}22`, border: `1px solid ${RED}44`, color: RED }}>
+                SELL{lots > 1 ? ` ×${lots}` : ""}
+              </button>
+              <button type="button" onClick={() => onOrder(ce, "BUY")}
+                style={{ padding: "3px 7px", borderRadius: 4, cursor: "pointer", fontSize: "0.68rem", fontWeight: 700, background: `${GREEN}22`, border: `1px solid ${GREEN}44`, color: GREEN }}>
+                BUY{lots > 1 ? ` ×${lots}` : ""}
+              </button>
+            </div>
+            <div style={{ fontFamily: "ui-monospace,monospace", fontSize: "1.15rem", fontWeight: 800, color: GREEN }}>
+              {fmt(ce.ltp)}
+            </div>
+            <div style={{ fontSize: "0.72rem", color: ce.change >= 0 ? GREEN : RED, fontWeight: 600 }}>
+              {ce.change >= 0 ? "+" : ""}{fmt(ce.change)} ({ceChPct != null ? (ceChPct >= 0 ? "+" : "") + ceChPct.toFixed(2) : "—"}%)
+            </div>
+            <div style={{ fontSize: "0.67rem", color: DIM }}>{fmtOI(ce.oi)}</div>
+            <OIBar oi={ce.oi} maxOI={maxCeOI} color={GREEN} />
+          </>
+        ) : <span style={{ color: DIM, fontSize: "0.75rem" }}>—</span>}
       </div>
 
-      {/* type badge */}
-      <div>
-        <span style={{
-          fontSize: "0.72rem", fontWeight: 800, padding: "2px 8px", borderRadius: 4,
-          background: `${color}22`, border: `1px solid ${color}55`, color,
+      {/* ── Center: Strike + PCR ── */}
+      <div style={{
+        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+        padding: "10px 6px", gap: 3,
+        background: isATM ? `${YELLOW}0d` : "transparent",
+      }}>
+        <div style={{
+          fontFamily: "ui-monospace,monospace",
+          fontWeight: isATM ? 800 : 700,
+          fontSize: isATM ? "1rem" : "0.92rem",
+          color: isATM ? YELLOW : TEXT,
         }}>
-          {opt.type}
-        </span>
+          {strike}
+        </div>
+        {isATM && (
+          <span style={{ fontSize: "0.58rem", fontWeight: 700, color: YELLOW, background: `${YELLOW}22`, borderRadius: 3, padding: "1px 5px", letterSpacing: "0.05em" }}>ATM</span>
+        )}
+        {pcr != null && (
+          <div style={{ fontSize: "0.67rem", color: DIM, marginTop: 1 }}>
+            PCR: <span style={{ color: pcr > 1 ? GREEN : pcr < 0.7 ? RED : TEXT, fontWeight: 600 }}>{pcr.toFixed(2)}</span>
+          </div>
+        )}
       </div>
 
-      {/* LTP */}
-      <div style={{ fontFamily: "ui-monospace,monospace", fontWeight: 700, color: TEXT, fontSize: "0.88rem" }}>
-        {fmt(opt.ltp)}
+      {/* ── PE side (right, left-aligned) ── */}
+      <div style={{ ...sideStyle("flex-start"), borderLeft: `1px solid ${BORDER}` }}>
+        {pe ? (
+          <>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <button type="button" onClick={() => onOrder(pe, "BUY")}
+                style={{ padding: "3px 7px", borderRadius: 4, cursor: "pointer", fontSize: "0.68rem", fontWeight: 700, background: `${GREEN}22`, border: `1px solid ${GREEN}44`, color: GREEN }}>
+                BUY{lots > 1 ? ` ×${lots}` : ""}
+              </button>
+              <button type="button" onClick={() => onOrder(pe, "SELL")}
+                style={{ padding: "3px 7px", borderRadius: 4, cursor: "pointer", fontSize: "0.68rem", fontWeight: 700, background: `${RED}22`, border: `1px solid ${RED}44`, color: RED }}>
+                SELL{lots > 1 ? ` ×${lots}` : ""}
+              </button>
+            </div>
+            <div style={{ fontFamily: "ui-monospace,monospace", fontSize: "1.15rem", fontWeight: 800, color: RED }}>
+              {fmt(pe.ltp)}
+            </div>
+            <div style={{ fontSize: "0.72rem", color: pe.change >= 0 ? GREEN : RED, fontWeight: 600 }}>
+              {pe.change >= 0 ? "+" : ""}{fmt(pe.change)} ({peChPct != null ? (peChPct >= 0 ? "+" : "") + peChPct.toFixed(2) : "—"}%)
+            </div>
+            <div style={{ fontSize: "0.67rem", color: DIM }}>{fmtOI(pe.oi)}</div>
+            <OIBar oi={pe.oi} maxOI={maxPeOI} color={RED} />
+          </>
+        ) : <span style={{ color: DIM, fontSize: "0.75rem" }}>—</span>}
       </div>
-
-      {/* change */}
-      <div style={{ fontFamily: "ui-monospace,monospace", fontSize: "0.78rem", fontWeight: 600, color: change >= 0 ? GREEN : RED }}>
-        {change >= 0 ? "+" : ""}{fmt(change)}
-      </div>
-
-      {/* OI */}
-      <div style={{ fontSize: "0.78rem", color: DIM, fontFamily: "ui-monospace,monospace" }}>
-        {fmtOI(opt.oi)}
-      </div>
-
-      {/* BUY button */}
-      <button
-        type="button"
-        onClick={() => onOrder(opt, "BUY")}
-        style={{
-          padding: "6px 10px", borderRadius: 6, cursor: "pointer",
-          background: `${GREEN}22`, border: `1px solid ${GREEN}55`,
-          color: GREEN, fontWeight: 800, fontSize: "0.78rem",
-        }}
-      >
-        BUY {lots > 1 ? `×${lots}` : ""}
-      </button>
-
-      {/* SELL button */}
-      <button
-        type="button"
-        onClick={() => onOrder(opt, "SELL")}
-        style={{
-          padding: "6px 10px", borderRadius: 6, cursor: "pointer",
-          background: `${RED}22`, border: `1px solid ${RED}55`,
-          color: RED, fontWeight: 800, fontSize: "0.78rem",
-        }}
-      >
-        SELL {lots > 1 ? `×${lots}` : ""}
-      </button>
     </div>
   );
 }
@@ -183,6 +217,7 @@ export function NiftyATMEntry({ accessToken }) {
   const [orderType, setOrderType]     = useState("MARKET");
   const [limitPrice, setLimitPrice]   = useState("");
   const [product, setProduct]         = useState("I"); // I = intraday MIS
+  const [strikeRange, setStrikeRange] = useState(200); // how many points from ATM to show (100/150/200/all)
 
   // confirm modal
   const [pendingOrder, setPendingOrder] = useState(null);
@@ -416,6 +451,25 @@ export function NiftyATMEntry({ accessToken }) {
             ))}
           </div>
         </div>
+
+        {/* strike range */}
+        <div>
+          <div style={{ fontSize: "0.68rem", color: DIM, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 5 }}>Show Strikes</div>
+          <select
+            value={strikeRange}
+            onChange={e => setStrikeRange(Number(e.target.value))}
+            style={{
+              background: "#0d1117", border: `1px solid ${BORDER}`, borderRadius: 5,
+              color: TEXT, padding: "6px 10px", fontSize: "0.8rem", cursor: "pointer",
+            }}
+          >
+            <option value={50}>ATM ±1 (50 pts)</option>
+            <option value={100}>ATM ±2 (100 pts)</option>
+            <option value={150}>ATM ±3 (150 pts)</option>
+            <option value={200}>ATM ±4 (200 pts)</option>
+            <option value={9999}>All</option>
+          </select>
+        </div>
       </div>
 
       {/* ── order result toast ───────────────────────────────────────────── */}
@@ -441,86 +495,75 @@ export function NiftyATMEntry({ accessToken }) {
       )}
 
       {/* ── option chain table ───────────────────────────────────────────── */}
-      {options.length > 0 ? (
-        <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: 10, overflow: "hidden" }}>
-          {/* header */}
-          <div style={{
-            display: "grid",
-            gridTemplateColumns: "90px 70px 70px 70px 80px 90px 90px",
-            gap: 0, padding: "8px 14px",
-            borderBottom: `1px solid ${BORDER}`,
-            background: "rgba(255,255,255,0.03)",
-          }}>
-            {["Strike", "Type", "LTP", "Change", "OI", "BUY", "SELL"].map(h => (
-              <div key={h} style={{ fontSize: "0.67rem", fontWeight: 700, color: DIM, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                {h}
+      {options.length > 0 ? (() => {
+        // Group by strike, filtered by user's range selection
+        const strikes = [...new Set(options.map(o => o.strike))]
+          .filter(s => Math.abs(s - atm_strike) <= strikeRange)
+          .sort((a, b) => a - b);
+        const byStrike = {};
+        for (const o of options) {
+          if (!byStrike[o.strike]) byStrike[o.strike] = {};
+          byStrike[o.strike][o.type] = o;
+        }
+        const maxCeOI = Math.max(...options.filter(o => o.type === "CE").map(o => o.oi || 0), 1);
+        const maxPeOI = Math.max(...options.filter(o => o.type === "PE").map(o => o.oi || 0), 1);
+
+        return (
+          <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: 10, overflow: "hidden" }}>
+            {/* column headers */}
+            <div style={{
+              display: "grid", gridTemplateColumns: "1fr 110px 1fr",
+              borderBottom: `2px solid ${BORDER}`,
+              background: "rgba(255,255,255,0.03)",
+            }}>
+              <div style={{ padding: "8px 10px", textAlign: "right", fontSize: "0.7rem", fontWeight: 700, color: GREEN, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                CALL (CE)
               </div>
-            ))}
-          </div>
+              <div style={{ padding: "8px 6px", textAlign: "center", fontSize: "0.7rem", fontWeight: 700, color: DIM, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                Strike
+              </div>
+              <div style={{ padding: "8px 10px", textAlign: "left", fontSize: "0.7rem", fontWeight: 700, color: RED, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                PUT (PE)
+              </div>
+            </div>
 
-          {/* rows — grouped by strike with OTM/ATM/ITM section labels */}
-          <div style={{ padding: "8px 8px" }}>
-            {(() => {
-              // Unique strikes ascending
-              const strikes = [...new Set(options.map(o => o.strike))].sort((a, b) => a - b);
-              const rows = [];
-              let lastSection = null;
-
-              for (const strike of strikes) {
-                // Section label per strike
-                const diff = strike - atm_strike;
-                let section;
-                if (diff === 0) section = "ATM";
-                else if (diff > 0) section = diff <= 100 ? "Near ATM" : "OTM (CE side)";
-                else section = diff >= -100 ? "Near ATM" : "OTM (PE side)";
-
-                if (section !== lastSection) {
-                  lastSection = section;
-                  const sectionColor =
-                    section === "ATM" ? YELLOW :
-                    section.startsWith("OTM") ? RED :
-                    DIM;
-                  rows.push(
-                    <div key={`sec-${strike}`} style={{
-                      padding: "4px 14px 2px",
-                      fontSize: "0.65rem",
-                      fontWeight: 700,
-                      color: sectionColor,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.08em",
-                      borderTop: lastSection === null ? "none" : `1px solid ${BORDER}`,
-                      marginTop: lastSection === null ? 0 : 4,
-                      paddingTop: 8,
+            {/* spot line + strike rows */}
+            {strikes.map((strike, i) => {
+              const prev = strikes[i - 1];
+              const showSpot = spot_price != null && prev != null && prev < spot_price && spot_price <= strike;
+              return (
+                <div key={strike}>
+                  {showSpot && (
+                    <div style={{
+                      display: "flex", alignItems: "center", gap: 8,
+                      padding: "4px 14px", background: `${YELLOW}10`,
+                      borderTop: `1px dashed ${YELLOW}55`, borderBottom: `1px dashed ${YELLOW}55`,
+                      fontSize: "0.72rem", fontWeight: 700, color: YELLOW,
                     }}>
-                      {section}
+                      <span>▲ Spot</span>
+                      <span style={{ fontFamily: "ui-monospace,monospace" }}>{fmt(spot_price)}</span>
                     </div>
-                  );
-                }
-
-                const strikeOpts = options.filter(o => o.strike === strike);
-                // CE first, then PE
-                strikeOpts.sort((a, b) => a.type === "CE" ? -1 : 1);
-                for (const opt of strikeOpts) {
-                  rows.push(
-                    <OptionRow
-                      key={opt.instrument_key}
-                      opt={opt}
-                      isATM={opt.strike === atm_strike}
-                      lots={lots}
-                      lotSize={opt.lot_size || 75}
-                      orderType={orderType}
-                      limitPrice={limitPrice}
-                      product={product}
-                      onOrder={initiateOrder}
-                    />
-                  );
-                }
-              }
-              return rows;
-            })()}
+                  )}
+                  <StrikeRow
+                    strike={strike}
+                    ce={byStrike[strike]?.CE}
+                    pe={byStrike[strike]?.PE}
+                    isATM={strike === atm_strike}
+                    maxCeOI={maxCeOI}
+                    maxPeOI={maxPeOI}
+                    lots={lots}
+                    orderType={orderType}
+                    limitPrice={limitPrice}
+                    product={product}
+                    onOrder={initiateOrder}
+                    spotPrice={spot_price}
+                  />
+                </div>
+              );
+            })}
           </div>
-        </div>
-      ) : !loading && (
+        );
+      })() : !loading && (
         <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: 10, padding: "32px", textAlign: "center", color: DIM, fontSize: "0.85rem" }}>
           No option data. Click Refresh.
         </div>
