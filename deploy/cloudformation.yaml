@@ -94,7 +94,7 @@ Resources:
         - Key: Name
           Value: LiveTrading-SG
 
-  # --- IAM Role (CloudWatch Logs, SSM access) ---
+  # --- IAM Role (CloudWatch Logs, SSM access, Cost Explorer) ---
 
   EC2Role:
     Type: AWS::IAM::Role
@@ -110,6 +110,16 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
         - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: CostExplorerReadOnly
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ce:GetCostAndUsage
+                  - ce:GetCostForecast
+                Resource: "*"
       Tags:
         - Key: Name
           Value: LiveTrading-Role
@@ -119,6 +129,82 @@ Resources:
     Properties:
       Roles:
         - !Ref EC2Role
+
+  # --- IAM User for CI/CD (GitHub Actions CloudFormation deploy) ---
+
+  CICDUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: LiveTrading-CICD-User
+      Tags:
+        - Key: Name
+          Value: LiveTrading-CICD-User
+
+  CICDUserAccessKey:
+    Type: AWS::IAM::AccessKey
+    Properties:
+      UserName: !Ref CICDUser
+
+  CICDPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: LiveTrading-CICD-Policy
+      Users:
+        - !Ref CICDUser
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: CloudFormationDeploy
+            Effect: Allow
+            Action:
+              - cloudformation:CreateStack
+              - cloudformation:UpdateStack
+              - cloudformation:DescribeStacks
+              - cloudformation:DescribeStackEvents
+              - cloudformation:DescribeStackResources
+              - cloudformation:GetTemplate
+              - cloudformation:ValidateTemplate
+            Resource: !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/livetrading*"
+          - Sid: IAMForEC2Role
+            Effect: Allow
+            Action:
+              - iam:GetRole
+              - iam:CreateRole
+              - iam:UpdateRole
+              - iam:DeleteRole
+              - iam:PutRolePolicy
+              - iam:DeleteRolePolicy
+              - iam:GetRolePolicy
+              - iam:AttachRolePolicy
+              - iam:DetachRolePolicy
+              - iam:PassRole
+              - iam:CreateInstanceProfile
+              - iam:DeleteInstanceProfile
+              - iam:AddRoleToInstanceProfile
+              - iam:RemoveRoleFromInstanceProfile
+              - iam:GetInstanceProfile
+              - iam:TagRole
+              - iam:CreateUser
+              - iam:DeleteUser
+              - iam:GetUser
+              - iam:TagUser
+              - iam:CreateAccessKey
+              - iam:DeleteAccessKey
+              - iam:PutUserPolicy
+              - iam:DeleteUserPolicy
+              - iam:GetUserPolicy
+              - iam:AttachUserPolicy
+              - iam:DetachUserPolicy
+            Resource:
+              - !Sub "arn:aws:iam::${AWS::AccountId}:role/LiveTrading-*"
+              - !Sub "arn:aws:iam::${AWS::AccountId}:instance-profile/LiveTrading-*"
+              - !Sub "arn:aws:iam::${AWS::AccountId}:user/LiveTrading-*"
+              - !Sub "arn:aws:iam::${AWS::AccountId}:policy/LiveTrading-*"
+          - Sid: EC2ReadForCFN
+            Effect: Allow
+            Action:
+              - ec2:Describe*
+            Resource: "*"
 
   # --- EC2 Instance ---
 
@@ -318,9 +404,19 @@ Outputs:
     Description: Set this as redirect URI in Upstox Developer Console
     Value: !Sub "http://${ElasticIP}/api/auth/callback"
 
+  CICDAccessKeyId:
+    Description: AWS_ACCESS_KEY_ID for GitHub Actions secret (CFN_STACK_NAME deploy)
+    Value: !Ref CICDUserAccessKey
+
+  CICDSecretAccessKey:
+    Description: AWS_SECRET_ACCESS_KEY for GitHub Actions secret — store immediately, shown only once
+    Value: !GetAtt CICDUserAccessKey.SecretAccessKey
+
   PostDeployNote:
     Description: Important post-deployment steps
     Value: >
       1) Update Upstox redirect URI in developer console to the URL above.
       2) SSH in and verify: pm2 status, curl http://localhost:3000/api/tools/discover-nifty-future.
       3) Open the App URL in browser and click Login to authorize.
+      4) Copy CICDAccessKeyId + CICDSecretAccessKey outputs into GitHub Secrets
+         as AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY.

@@ -32,9 +32,70 @@ jobs:
       - name: Build
         run: npm run build
 
+  # CloudFormation update: syncs IAM role / infra before app deploy
+  cfn-update:
+    needs: lint-build
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION || 'ap-south-1' }}
+
+      - name: Deploy CloudFormation stack
+        run: |
+          STACK_NAME="${{ secrets.CFN_STACK_NAME }}"
+          if [ -z "$STACK_NAME" ]; then
+            echo "CFN_STACK_NAME secret is not set"; exit 1
+          fi
+
+          # Check if stack exists
+          STATUS=$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --query "Stacks[0].StackStatus" \
+            --output text 2>/dev/null || echo "DOES_NOT_EXIST")
+
+          if [ "$STATUS" = "DOES_NOT_EXIST" ]; then
+            echo "Stack $STACK_NAME does not exist — creating..."
+            ACTION="create-stack"
+            WAIT_EVENT="stack-create-complete"
+          else
+            echo "Stack $STACK_NAME exists (status: $STATUS) — updating..."
+            ACTION="update-stack"
+            WAIT_EVENT="stack-update-complete"
+          fi
+
+          aws cloudformation $ACTION \
+            --stack-name "$STACK_NAME" \
+            --template-body file://deploy/cloudformation.yaml \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --parameters file://deploy/cfn-params.example.json 2>&1 | tee /tmp/cfn-output.txt || {
+              # update-stack exits non-zero when there are no changes — that is fine
+              if grep -q "No updates are to be performed" /tmp/cfn-output.txt; then
+                echo "No CloudFormation changes — skipping wait."
+                exit 0
+              fi
+              cat /tmp/cfn-output.txt
+              exit 1
+            }
+
+          echo "Waiting for $WAIT_EVENT..."
+          aws cloudformation wait "$WAIT_EVENT" --stack-name "$STACK_NAME"
+          echo "CloudFormation update complete."
+
   # EC2 deploy: only after CI passes on main (or manual run from Actions tab)
   deploy:
-    needs: lint-build
+    needs: [lint-build, cfn-update]
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     timeout-minutes: 30
