@@ -13,6 +13,7 @@ import crypto from "crypto";
 import { setTimeout as sleep } from "timers/promises";
 import { WebSocketServer } from "ws";
 import { updateEnvToken } from "./utils/tokenManager.js";
+import { CostExplorerClient, GetCostAndUsageCommand } from "@aws-sdk/client-cost-explorer";
 import { computeIntradayPivots } from "./src/utils/intradayPivots.js";
 import { startOITracker, getOIHistory, getLatestOI } from "./oi-tracker.js";
 import { upstoxFeed, startFeed } from "./upstox-feed.js";
@@ -1885,8 +1886,6 @@ if (IS_PROD) {
 
 // ── AWS Cost Analysis API ─────────────────────────────────────────────────────
 // GET /api/aws/costs?period=current|last|3months
-import { CostExplorerClient, GetCostAndUsageCommand } from "@aws-sdk/client-cost-explorer";
-
 const ceClient = new CostExplorerClient({ region: "us-east-1" }); // Cost Explorer is global, must use us-east-1
 
 function getDateRange(period) {
