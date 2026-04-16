@@ -12,6 +12,7 @@ import { NiftyATMEntry } from "./components/NiftyATMEntry";
 import { SensexOptionChain } from "./components/SensexOptionChain";
 import { NiftyFutureChart }  from "./components/NiftyFutureChart";
 import { AwsCostAnalysisPage } from "./components/AwsCostAnalysisPage";
+import { SshCommandsPage } from "./components/SshCommandsPage";
 
 class TabErrorBoundary extends React.Component {
   state = { hasError: false, error: null };
@@ -383,6 +384,18 @@ function App() {
             >
               AWS Cost
             </button>
+            <button
+              type="button"
+              onClick={() => setActivePage("ssh")}
+              style={{
+                padding: "6px 10px",
+                fontSize: "0.72rem",
+                background: activePage === "ssh" ? "rgba(38,166,154,0.22)" : "rgba(255,255,255,0.08)",
+                border: activePage === "ssh" ? "1px solid rgba(38,166,154,0.45)" : "1px solid rgba(255,255,255,0.16)",
+              }}
+            >
+              SSH
+            </button>
           </div>
         </div>
 
@@ -459,6 +472,10 @@ function App() {
         ) : activePage === "aws-cost" ? (
           <TabErrorBoundary>
             <AwsCostAnalysisPage />
+          </TabErrorBoundary>
+        ) : activePage === "ssh" ? (
+          <TabErrorBoundary>
+            <SshCommandsPage />
           </TabErrorBoundary>
         ) : (
           <>
