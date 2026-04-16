@@ -5,11 +5,13 @@ import dotenv from "dotenv";
 import querystring from "querystring";
 import zlib from "zlib";
 import fs from "fs";
+import http from "http";
 import path from "path";
 import { fileURLToPath } from "url";
 import { promisify } from "util";
 import crypto from "crypto";
 import { setTimeout as sleep } from "timers/promises";
+import { WebSocketServer } from "ws";
 import { updateEnvToken } from "./utils/tokenManager.js";
 import { computeIntradayPivots } from "./src/utils/intradayPivots.js";
 
@@ -83,7 +85,7 @@ const loadCompleteData = async () => {
 const getMasterData = async (exchange) => {
   const allData = await loadCompleteData();
   if (!allData) return null;
-  const segmentMap = { NFO: "NSE_FO", NSE: "NSE_EQ" };
+  const segmentMap = { NFO: "NSE_FO", NSE: "NSE_EQ", BFO: "BSE_FO" };
   const segment = segmentMap[exchange] || exchange;
   return allData.filter(i => i.segment === segment);
 };
@@ -1781,6 +1783,165 @@ app.post("/api/oi-alert", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+// ── Sensex Option Chain ──────────────────────────────────────────────────────
+// GET /api/sensex-options  →  spot, atm, expiry, options[] with instrument keys
+app.get("/api/sensex-options", async (req, res) => {
+  try {
+    const accessToken = req.headers.authorization || FALLBACK_ACCESS_TOKEN;
+    if (!accessToken) return res.status(400).json({ error: "Missing Authorization" });
+
+    const bfoInstruments = await getMasterData("BFO");
+    if (!bfoInstruments) return res.status(500).json({ error: "Could not load BFO master list" });
+
+    // Find nearest Sensex future for spot price
+    const sensexFutures = bfoInstruments.filter(
+      i => i.name === "SENSEX" && i.instrument_type === "FUT"
+    );
+    sensexFutures.sort((a, b) => a.expiry - b.expiry);
+    const nearFut = sensexFutures[0];
+    if (!nearFut) return res.status(404).json({ error: "No SENSEX future found in BFO" });
+
+    // Get spot from future LTP
+    const futRes = await axios.get(
+      `https://api.upstox.com/v2/market-quote/quotes?instrument_key=${encodeURIComponent(nearFut.instrument_key)}`,
+      { headers: { Authorization: accessToken, Accept: "application/json" } }
+    );
+    let spot = 0;
+    if (futRes.data?.data) {
+      const q = Object.values(futRes.data.data)[0];
+      spot = q?.last_price || 0;
+    }
+    if (!spot) return res.status(500).json({ error: "Could not get SENSEX spot price" });
+
+    // ATM: Sensex options use 100-point intervals
+    const atm = Math.round(spot / 100) * 100;
+    const strikes = Array.from({ length: 21 }, (_, i) => atm + (i - 10) * 100);
+
+    // Find nearest expiry options
+    const sensexOpts = bfoInstruments.filter(
+      i => i.name === "SENSEX" && (i.instrument_type === "CE" || i.instrument_type === "PE")
+    );
+    const expiries = [...new Set(sensexOpts.map(o => o.expiry))].sort((a, b) => a - b);
+    const nearExpiry = expiries[0];
+    const expiryOpts = sensexOpts.filter(o => o.expiry === nearExpiry);
+
+    // Build instrument key list + meta
+    const optKeys = [];
+    const optMeta = {};
+    for (const strike of strikes) {
+      for (const type of ["CE", "PE"]) {
+        const opt = expiryOpts.find(
+          o => o.strike_price === strike && o.instrument_type === type
+        );
+        if (opt) {
+          optKeys.push(opt.instrument_key);
+          optMeta[opt.instrument_key] = {
+            strike, type, symbol: opt.trading_symbol,
+            lot_size: opt.lot_size || 10,
+          };
+        }
+      }
+    }
+
+    // Initial quotes
+    const options = [];
+    if (optKeys.length > 0) {
+      const oRes = await axios.get(
+        `https://api.upstox.com/v2/market-quote/quotes?instrument_key=${encodeURIComponent(optKeys.join(","))}`,
+        { headers: { Authorization: accessToken, Accept: "application/json" } }
+      );
+      if (oRes.data?.data) {
+        for (const [, q] of Object.entries(oRes.data.data)) {
+          const meta = optMeta[q.instrument_token];
+          if (!meta) continue;
+          options.push({
+            instrument_key: q.instrument_token,
+            strike: meta.strike, type: meta.type,
+            symbol: meta.symbol, lot_size: meta.lot_size,
+            ltp: q.last_price || 0, oi: q.oi || 0,
+            volume: q.volume || 0, change: q.net_change || 0,
+          });
+        }
+      }
+    }
+    options.sort((a, b) => a.strike === b.strike ? (a.type === "CE" ? -1 : 1) : a.strike - b.strike);
+
+    res.json({
+      status: "success",
+      data: {
+        spot_price: spot, atm_strike: atm,
+        expiry_date: new Date(nearExpiry).toLocaleDateString("en-IN"),
+        instrument_keys: optKeys,   // for WebSocket subscription
+        options,
+      },
+    });
+  } catch (err) {
+    console.error("Sensex options error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── HTTP server + WebSocket server (shared port) ─────────────────────────────
+const server = http.createServer(app);
+const wss = new WebSocketServer({ server });
+
+// Each client subscribes to a set of instrument keys.
+// The proxy polls Upstox REST at 1.5 s intervals and pushes JSON quotes.
+wss.on("connection", (ws) => {
+  let pollTimer = null;
+  let subscribedKeys = [];
+  let clientToken = null;
+
+  ws.on("message", (raw) => {
+    try {
+      const msg = JSON.parse(raw.toString());
+      if (msg.type === "subscribe" && Array.isArray(msg.keys) && msg.token) {
+        subscribedKeys = msg.keys;
+        clientToken = msg.token;
+        startPolling();
+      } else if (msg.type === "unsubscribe") {
+        stopPolling();
+      }
+    } catch { /* ignore malformed */ }
+  });
+
+  ws.on("close", stopPolling);
+  ws.on("error", stopPolling);
+
+  function stopPolling() {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  }
+
+  function startPolling() {
+    stopPolling();
+    poll(); // immediate first tick
+    pollTimer = setInterval(poll, 1500);
+  }
+
+  async function poll() {
+    if (!subscribedKeys.length || !clientToken || ws.readyState !== 1) return;
+    try {
+      const url = `https://api.upstox.com/v2/market-quote/quotes?instrument_key=${encodeURIComponent(subscribedKeys.join(","))}`;
+      const r = await axios.get(url, {
+        headers: { Authorization: clientToken, Accept: "application/json" },
+        timeout: 5000,
+      });
+      if (!r.data?.data) return;
+      const quotes = {};
+      for (const [, q] of Object.entries(r.data.data)) {
+        quotes[q.instrument_token] = {
+          ltp: q.last_price || 0, oi: q.oi || 0,
+          change: q.net_change || 0, volume: q.volume || 0,
+        };
+      }
+      if (ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: "quotes", data: quotes }));
+      }
+    } catch { /* network blip, skip */ }
+  }
+});
+
+server.listen(PORT, () => {
   console.log(`Proxy Server V3 running on http://localhost:${PORT} [${IS_PROD ? "PRODUCTION" : "DEVELOPMENT"}]`);
+  console.log(`WebSocket server ready on ws://localhost:${PORT}`);
 });
