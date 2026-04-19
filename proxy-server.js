@@ -1993,6 +1993,17 @@ const wss = new WebSocketServer({ server });
 // ── Single Upstox WebSocket feed → fan-out to frontend clients ───────────────
 // clientSubs: Map<ws, Set<string>>  tracks which instrument keys each client wants
 const clientSubs = new Map();
+let feedToken = null;   // token currently used by the feed
+let feedStarted = false;
+
+/** Start (or restart with new token) the Upstox feed — only when a client subscribes */
+function ensureFeedRunning(token) {
+  if (!token) return;
+  if (feedStarted && feedToken === token) return; // already running with same token
+  feedToken = token;
+  feedStarted = true;
+  startFeed(token);
+}
 
 wss.on("connection", (ws) => {
   clientSubs.set(ws, new Set());
@@ -2001,11 +2012,12 @@ wss.on("connection", (ws) => {
     try {
       const msg = JSON.parse(raw.toString());
 
-      if (msg.type === "subscribe" && Array.isArray(msg.keys)) {
+      if (msg.type === "subscribe" && Array.isArray(msg.keys) && msg.token) {
         const subs = clientSubs.get(ws);
         if (!subs) return;
         msg.keys.forEach((k) => subs.add(k));
-        // Tell the feed about the new keys (feed sends diff only)
+        // Start feed lazily on first subscription (uses client's token)
+        ensureFeedRunning(msg.token);
         upstoxFeed.subscribe(msg.keys);
       } else if (msg.type === "unsubscribe") {
         clientSubs.delete(ws);
@@ -2014,38 +2026,27 @@ wss.on("connection", (ws) => {
     } catch { /* ignore malformed */ }
   });
 
-  function cleanup() {
-    clientSubs.delete(ws);
-  }
-
+  function cleanup() { clientSubs.delete(ws); }
   ws.on("close", cleanup);
   ws.on("error", cleanup);
 });
 
-// Forward ticks from the single Upstox feed to all subscribed frontend clients
+// Forward ticks — single combined message per tick per client
 upstoxFeed.on("tick", (tick) => {
   const { instrument_key, ltp, ltt, ltq, oi, volume, cp, atp } = tick;
+  if (!instrument_key || !ltp) return; // skip empty ticks
 
-  // New-style per-instrument tick message
-  const tickMsg = JSON.stringify({
-    type: "tick",
-    data: { instrument_key, ltp, ltt, ltq, oi, volume, cp, atp },
-  });
-
-  // Backward-compatible quotes message (OIMonitor, SensexOptionChain, NiftyATMEntry)
-  const change = cp ? ltp - cp : 0;
-  const quotesMsg = JSON.stringify({
-    type: "quotes",
-    data: {
-      [instrument_key]: { ltp, oi, change, volume },
-    },
+  // One message carries both formats so every component works
+  const msg = JSON.stringify({
+    type:  "tick",
+    data:  { instrument_key, ltp, ltt, ltq, oi, volume, cp, atp },
+    // backward-compat quotes envelope (OIMonitor / SensexOptionChain / NiftyATMEntry)
+    quotes: { [instrument_key]: { ltp, oi, change: cp ? ltp - cp : 0, volume } },
   });
 
   for (const [ws, subs] of clientSubs) {
-    if (ws.readyState !== 1) continue;
-    if (!subs.has(instrument_key)) continue;
-    ws.send(tickMsg);
-    ws.send(quotesMsg);
+    if (ws.readyState !== 1 || !subs.has(instrument_key)) continue;
+    ws.send(msg);
   }
 });
 
@@ -2053,12 +2054,11 @@ server.listen(PORT, () => {
   console.log(`Proxy Server V3 running on http://localhost:${PORT} [${IS_PROD ? "PRODUCTION" : "DEVELOPMENT"}]`);
   console.log(`WebSocket server ready on ws://localhost:${PORT}`);
 
-  // Start Future OI tracker (polls every 3 min during market hours)
+  // OI tracker starts but only polls during market hours — low load
   startOITracker({
     getAccessToken: () => FALLBACK_ACCESS_TOKEN,
     getMasterData,
   });
-
-  // Start the single Upstox market-data WebSocket feed
-  startFeed(FALLBACK_ACCESS_TOKEN);
+  // NOTE: Upstox feed is NOT started here — it starts lazily when
+  // the first frontend client subscribes and provides a valid token.
 });

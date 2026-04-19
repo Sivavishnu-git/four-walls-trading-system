@@ -69,17 +69,19 @@ export function useLiveWS(instrumentKeys, accessToken) {
         try {
           const msg = JSON.parse(e.data);
 
-          // ── new tick format (from Upstox WebSocket feed) ──────────────────
+          // ── combined tick message (new proxy format) ──────────────────────
           if (msg.type === "tick" && msg.data) {
             const t = msg.data;
-            setLastTick(t); // raw tick for chart candle building
+            setLastTick(t);
+            // update quote state (for OIMonitor, ATM entry, etc.)
             setData((prev) => ({
               ...prev,
+              ...(msg.quotes || {}),
               [t.instrument_key]: {
                 ltp:    t.ltp,
                 oi:     t.oi,
                 volume: t.volume,
-                change: t.ltp - t.cp,   // cp = previous close price
+                change: t.cp ? t.ltp - t.cp : 0,
                 atp:    t.atp,
                 ltt:    t.ltt,
                 ltq:    t.ltq,
@@ -87,7 +89,7 @@ export function useLiveWS(instrumentKeys, accessToken) {
             }));
           }
 
-          // ── backward-compatible quotes format ─────────────────────────────
+          // ── legacy quotes-only format (fallback) ─────────────────────────
           if (msg.type === "quotes" && msg.data) {
             setData((prev) => ({ ...prev, ...msg.data }));
           }
