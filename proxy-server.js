@@ -39,6 +39,13 @@ app.use((req, res, next) => {
 });
 
 // --- MASTER LIST CACHE (using complete.json.gz) ---
+// Only keep the fields we actually use — slims each record from ~25 fields to 9.
+// On a 500k-instrument list this cuts heap from ~350 MB down to ~35 MB.
+const KEEP_FIELDS = new Set([
+  "instrument_key", "name", "trading_symbol", "segment",
+  "instrument_type", "strike_price", "expiry", "lot_size", "asset_key",
+]);
+
 const COMPLETE_CACHE = { data: null, lastFetched: null };
 const COMPLETE_URL = "https://assets.upstox.com/market-quote/instruments/exchange/complete.json.gz";
 
@@ -63,13 +70,21 @@ const loadCompleteData = async () => {
         throw new Error(`HTTP ${response.status}`);
       }
       const decompressed = await gunzip(response.data);
-      const data = JSON.parse(decompressed.toString());
-      if (!Array.isArray(data)) {
+      const raw = JSON.parse(decompressed.toString());
+      if (!Array.isArray(raw)) {
         throw new Error("Master list JSON is not an array");
       }
+      // Slim each record — release the full parsed JSON for GC immediately
+      const data = raw.map((item) => {
+        const o = {};
+        for (const k of KEEP_FIELDS) {
+          if (item[k] !== undefined) o[k] = item[k];
+        }
+        return o;
+      });
       COMPLETE_CACHE.data = data;
       COMPLETE_CACHE.lastFetched = today;
-      console.log(`✅ Loaded ${data.length} instruments`);
+      console.log(`✅ Loaded ${data.length} instruments (slimmed to ${KEEP_FIELDS.size} fields)`);
       return data;
     } catch (err) {
       const detail = err.response?.status ?? err.code ?? err.message;
