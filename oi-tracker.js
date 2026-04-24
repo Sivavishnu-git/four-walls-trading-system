@@ -235,6 +235,11 @@ export function getOIHistory({ symbol, date, limit = 200 }) {
       "SELECT * FROM future_oi WHERE symbol = ? AND date = ? ORDER BY ts ASC LIMIT ?"
     ).all(symbol, date, limit);
   }
+  if (date) {
+    return db.prepare(
+      "SELECT * FROM future_oi WHERE date = ? ORDER BY ts ASC LIMIT ?"
+    ).all(date, limit);
+  }
   if (symbol) {
     return db.prepare(
       "SELECT * FROM future_oi WHERE symbol = ? ORDER BY ts DESC LIMIT ?"

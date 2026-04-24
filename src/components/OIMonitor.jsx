@@ -103,17 +103,19 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
 
     useEffect(() => {
         const fromStorage = loadOiHistoryFromStorage(instrumentKey);
-        if (fromStorage.length > 0) {
-            setOiHistory(fromStorage);
-            return;
-        }
-        // localStorage empty — seed with last 5 records from DB
-        apiFetch("/api/oi/history?limit=5")
+        // Always fetch today's full history from DB so snapshots captured while the
+        // app was closed are not missing. Merge with any live localStorage entries
+        // that are newer than the last DB snapshot.
+        const todayISO = new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD (matches DB date column)
+        apiFetch(`/api/oi/history?date=${todayISO}&limit=200`)
             .then((r) => r.json())
             .then(({ data }) => {
-                if (!Array.isArray(data) || data.length === 0) return;
+                if (!Array.isArray(data) || data.length === 0) {
+                    if (fromStorage.length > 0) setOiHistory(fromStorage);
+                    return;
+                }
                 const todayStr = new Date().toDateString();
-                const seeded = data
+                const fromDB = data
                     .map((row) => {
                         const fullTime = new Date(row.ts);
                         const prevOI   = row.oi - row.oi_change;
@@ -124,14 +126,26 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
                             change:        row.oi_change,
                             changePercent: prevOI > 0 ? +((row.oi_change / prevOI) * 100).toFixed(2) : 0,
                             fullTime,
-                            symbol:        row.symbol,
                         };
                     })
-                    .filter((r) => r.fullTime.toDateString() === todayStr)
-                    .reverse(); // DB returns DESC, display needs ASC
-                if (seeded.length > 0) setOiHistory(seeded);
+                    .filter((r) => r.fullTime.toDateString() === todayStr);
+
+                if (fromDB.length === 0) {
+                    if (fromStorage.length > 0) setOiHistory(fromStorage);
+                    return;
+                }
+
+                // Append any live localStorage entries that arrived after the last DB snapshot
+                const lastDBTime = fromDB[fromDB.length - 1].fullTime.getTime();
+                const newerFromStorage = fromStorage.filter(
+                    (r) => r.fullTime instanceof Date && r.fullTime.getTime() > lastDBTime,
+                );
+                const merged = [...fromDB, ...newerFromStorage].slice(-OI_HISTORY_MAX_ROWS);
+                setOiHistory(merged);
             })
-            .catch(() => { /* silently ignore — DB may be empty */ });
+            .catch(() => {
+                if (fromStorage.length > 0) setOiHistory(fromStorage);
+            });
     }, [instrumentKey]);
 
     useEffect(() => {
