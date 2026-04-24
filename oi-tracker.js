@@ -228,6 +228,16 @@ export function stopOITracker() {
   console.log("[OI] Tracker stopped");
 }
 
+// ── Write API helper (used by /api/oi/save endpoint) ─────────────────────────
+export function saveOISnapshot({ ts, symbol, oi, ltp, exchange = "NFO", expiry = "", volume = 0 }) {
+  const d = new Date(ts);
+  const date = d.toLocaleDateString("en-CA");
+  const time = d.toLocaleTimeString("en-IN", { hour12: false });
+  const oi_change = oi - (lastOI[symbol] ?? oi);
+  lastOI[symbol] = oi;
+  insertRow.run({ ts, date, time, symbol, expiry, oi, oi_change, ltp, volume, exchange });
+}
+
 // ── Read API helpers (used by /api/oi/history endpoint) ───────────────────────
 export function getOIHistory({ symbol, date, limit = 200 }) {
   if (symbol && date) {

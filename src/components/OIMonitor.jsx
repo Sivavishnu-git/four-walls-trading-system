@@ -15,6 +15,10 @@ import { apiFetch } from "../api/client.js";
 const OI_HISTORY_STORAGE_PREFIX = "oi_change_history:";
 /** Max 3‑minute snapshots kept in memory + localStorage (200 ≈ 10 hours). */
 const OI_HISTORY_MAX_ROWS = 200;
+/** Rows shown in the history table (full history kept in state for calculations). */
+const OI_DISPLAY_ROWS = 10;
+/** DB symbol name for the default Nifty futures instrument. */
+const OI_DB_SYMBOL = import.meta.env.VITE_OI_SYMBOL || "NIFTY";
 
 function getOiHistoryStorageKey(instrumentKey) {
     return `${OI_HISTORY_STORAGE_PREFIX}${instrumentKey}`;
@@ -107,7 +111,7 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
         // app was closed are not missing. Merge with any live localStorage entries
         // that are newer than the last DB snapshot.
         const todayISO = new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD (matches DB date column)
-        apiFetch(`/api/oi/history?date=${todayISO}&limit=10`)
+        apiFetch(`/api/oi/history?date=${todayISO}&limit=200`)
             .then((r) => r.json())
             .then(({ data }) => {
                 if (!Array.isArray(data) || data.length === 0) {
@@ -260,6 +264,13 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
             });
 
             setCurrentOI(oi);
+
+            // Persist this snapshot to the server DB so it survives localStorage clears
+            apiFetch("/api/oi/save", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ts: timestamp.getTime(), symbol: OI_DB_SYMBOL, oi, ltp }),
+            }).catch(() => { /* fire-and-forget — localStorage is the fallback */ });
         };
 
         const setupSyncTimer = () => {
@@ -725,7 +736,7 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
                                 </tr>
                             </thead>
                             <tbody>
-                                {[...oiHistory].reverse().map((entry, index) => (
+                                {[...oiHistory].reverse().slice(0, OI_DISPLAY_ROWS).map((entry, index) => (
                                     <tr
                                         key={
                                             entry.fullTime instanceof Date
