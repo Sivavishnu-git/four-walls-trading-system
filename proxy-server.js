@@ -15,7 +15,7 @@ import { WebSocketServer } from "ws";
 import { updateEnvToken } from "./utils/tokenManager.js";
 import { CostExplorerClient, GetCostAndUsageCommand } from "@aws-sdk/client-cost-explorer";
 import { computeIntradayPivots } from "./src/utils/intradayPivots.js";
-import { startOITracker, getOIHistory, getLatestOI } from "./oi-tracker.js";
+import { startOITracker, getOIHistory, getLatestOI, saveOISnapshot } from "./oi-tracker.js";
 import { upstoxFeed, startFeed } from "./upstox-feed.js";
 
 const gunzip = promisify(zlib.gunzip);
@@ -1895,8 +1895,9 @@ if (IS_PROD) {
 }
 
 // ── Future OI History API ─────────────────────────────────────────────────────
-// GET /api/oi/latest              → latest snapshot for all 3 futures
-// GET /api/oi/history?symbol=NIFTY&date=2025-06-16&limit=100
+// GET  /api/oi/latest              → latest snapshot for all 3 futures
+// GET  /api/oi/history?symbol=NIFTY&date=2025-06-16&limit=100
+// POST /api/oi/save               → persist a browser-captured OI snapshot
 app.get("/api/oi/latest", (_req, res) => {
   try { res.json({ status: "success", data: getLatestOI() }); }
   catch (e) { res.status(500).json({ error: e.message }); }
@@ -1907,6 +1908,22 @@ app.get("/api/oi/history", (req, res) => {
     const { symbol, date, limit } = req.query;
     const rows = getOIHistory({ symbol, date, limit: limit ? Number(limit) : 200 });
     res.json({ status: "success", data: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/api/oi/save", (req, res) => {
+  try {
+    const { ts, symbol, oi, ltp, exchange, expiry, volume } = req.body;
+    if (!ts || !symbol || oi === undefined || ltp === undefined)
+      return res.status(400).json({ error: "ts, symbol, oi, ltp are required" });
+    saveOISnapshot({
+      ts: Number(ts), symbol,
+      oi: Number(oi), ltp: Number(ltp),
+      exchange: exchange || "NFO",
+      expiry:   expiry   || "",
+      volume:   Number(volume || 0),
+    });
+    res.json({ status: "success" });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
