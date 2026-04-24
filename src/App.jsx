@@ -10,7 +10,6 @@ import { OrderAnalysisPage } from "./components/OrderAnalysisPage";
 import { PivotCalculatorPage } from "./components/PivotCalculatorPage";
 import { NiftyATMEntry } from "./components/NiftyATMEntry";
 import { SensexOptionChain } from "./components/SensexOptionChain";
-import { NiftyFutureChart }  from "./components/NiftyFutureChart";
 import { AwsCostAnalysisPage } from "./components/AwsCostAnalysisPage";
 import { SshCommandsPage } from "./components/SshCommandsPage";
 
@@ -362,18 +361,6 @@ function App() {
             </button>
             <button
               type="button"
-              onClick={() => setActivePage("chart")}
-              style={{
-                padding: "6px 10px",
-                fontSize: "0.72rem",
-                background: activePage === "chart" ? "rgba(38,166,154,0.22)" : "rgba(255,255,255,0.08)",
-                border: activePage === "chart" ? "1px solid rgba(38,166,154,0.45)" : "1px solid rgba(255,255,255,0.16)",
-              }}
-            >
-              NF Chart
-            </button>
-            <button
-              type="button"
               onClick={() => setActivePage("aws-cost")}
               style={{
                 padding: "6px 10px",
@@ -462,12 +449,6 @@ function App() {
         ) : activePage === "sensex" ? (
           <TabErrorBoundary>
             <SensexOptionChain accessToken={accessToken} />
-          </TabErrorBoundary>
-        ) : activePage === "chart" ? (
-          <TabErrorBoundary>
-            <div style={{ flex: 1, minHeight: 0, height: "calc(100vh - 52px)", position: "relative" }}>
-              <NiftyFutureChart accessToken={accessToken} />
-            </div>
           </TabErrorBoundary>
         ) : activePage === "aws-cost" ? (
           <TabErrorBoundary>

@@ -431,50 +431,6 @@ app.get("/api/auth/callback", async (req, res) => {
   }
 });
 
-// Proxy Endpoint for Historical Data
-app.get("/api/historical", async (req, res) => {
-  try {
-    const { instrument_key, interval, to_date, from_date } = req.query;
-    const accessToken = req.headers.authorization;
-
-    if (!accessToken) {
-      return res.status(400).json({ error: "Missing Authorization Header" });
-    }
-
-    const ik = instrument_key != null ? String(instrument_key).trim() : "";
-    if (!ik) {
-      return res.status(400).json({
-        status: "error",
-        error: "instrument_key is required (e.g. NIFTY future key from discover).",
-      });
-    }
-    if (!interval || !to_date || !from_date) {
-      return res.status(400).json({
-        status: "error",
-        error: "interval, to_date, and from_date are required.",
-      });
-    }
-
-    const ikSeg = encodeURIComponent(ik);
-    const targetUrl = `https://api.upstox.com/v2/historical-candle/${ikSeg}/${interval}/${to_date}/${from_date}`;
-    console.log("Fetching Historical Data (V2):", targetUrl);
-
-    const response = await axios.get(targetUrl, {
-      headers: {
-        Authorization: accessToken,
-        Accept: "application/json",
-      },
-    });
-
-    res.json(response.data);
-  } catch (error) {
-    const errorData = error.response ? error.response.data : error.message;
-    console.error("Historical Data Error:", JSON.stringify(errorData, null, 2));
-    res
-      .status(error.response ? error.response.status : 500)
-      .json(error.response ? error.response.data : { error: "Proxy Error" });
-  }
-});
 
 // Tool Endpoint: Auto-Discover Recent Nifty Future Key using NFO Master List
 app.get("/api/tools/discover-nifty-future", async (req, res) => {
@@ -1537,53 +1493,6 @@ async function resolveCurrentNiftyFutureInstrument() {
   return niftyFutures[0] || null;
 }
 
-/** Fast live LTP for chart — polls Upstox quotes only (no heavy historical). */
-app.get("/api/chart-quote", async (req, res) => {
-  try {
-    const accessToken = req.headers.authorization;
-    if (!accessToken) return res.status(400).json({ error: "Missing Authorization Header" });
-
-    const currentFuture = await resolveCurrentNiftyFutureInstrument();
-    if (!currentFuture) return res.status(404).json({ error: "No Nifty Future found" });
-
-    const futKey = currentFuture.instrument_key;
-    const quoteRes = await axios.get(
-      `https://api.upstox.com/v2/market-quote/quotes?instrument_key=${encodeURIComponent(futKey)}`,
-      { headers: { Authorization: accessToken, Accept: "application/json" } },
-    ).catch((e) => ({ data: null, error: e.response?.data || e.message }));
-
-    if (!quoteRes.data?.data) {
-      return res.status(502).json({ status: "error", error: "Quote unavailable" });
-    }
-    const q = Object.values(quoteRes.data.data).find((x) => x.instrument_token === futKey);
-    if (!q) return res.status(502).json({ status: "error", error: "No quote for instrument" });
-
-    const liveQuote = {
-      ltp: q.last_price,
-      oi: q.oi,
-      volume: q.volume,
-      open: q.ohlc?.open,
-      high: q.ohlc?.high,
-      low: q.ohlc?.low,
-      close: q.ohlc?.close,
-      change: q.net_change,
-      change_pct: q.percentage_change,
-    };
-
-    res.set("Cache-Control", "no-store, no-cache, must-revalidate, private");
-    res.json({
-      status: "success",
-      data: {
-        instrument_key: futKey,
-        future: buildFuturePayload(currentFuture),
-        live: liveQuote,
-      },
-    });
-  } catch (error) {
-    console.error("Chart quote error:", error.message);
-    res.status(500).json({ error: error.message });
-  }
-});
 
 // Trade Setup Endpoint — Fetches pivot data, intraday candles, live quote + ATM OI
 app.get("/api/trade-setup", async (req, res) => {
