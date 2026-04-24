@@ -107,7 +107,7 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
         // app was closed are not missing. Merge with any live localStorage entries
         // that are newer than the last DB snapshot.
         const todayISO = new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD (matches DB date column)
-        apiFetch(`/api/oi/history?date=${todayISO}&limit=200`)
+        apiFetch(`/api/oi/history?date=${todayISO}&limit=10`)
             .then((r) => r.json())
             .then(({ data }) => {
                 if (!Array.isArray(data) || data.length === 0) {
