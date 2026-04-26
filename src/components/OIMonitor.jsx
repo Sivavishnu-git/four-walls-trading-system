@@ -87,7 +87,7 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
     const [isLive, setIsLive] = useState(false);
     const [oiHistory, setOiHistory] = useState(() =>
         loadOiHistoryFromStorage(
-            propInstrumentKey || import.meta.env.VITE_INSTRUMENT_KEY || "NSE_FO|51714",
+            propInstrumentKey || import.meta.env.VITE_INSTRUMENT_KEY || "",
         ),
     );
     const [currentOI, setCurrentOI] = useState(null);
@@ -98,7 +98,7 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
     const [oiAlerts, setOiAlerts] = useState([]);
 
     const [instrumentKey, setInstrumentKey] = useState(
-        propInstrumentKey || import.meta.env.VITE_INSTRUMENT_KEY || "NSE_FO|51714",
+        propInstrumentKey || import.meta.env.VITE_INSTRUMENT_KEY || "",
     );
 
     useEffect(() => {

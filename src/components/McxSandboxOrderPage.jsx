@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "../api/client.js";
 
-const DEFAULT_BASE_KEY = "MCX_FO|554671";
 const SLOT_ORDER = ["ATM", "ITM1", "ITM2", "ITM3", "OTM1"];
 
 function extractReason(json, fallback = "Order failed") {
@@ -15,7 +14,7 @@ function extractReason(json, fallback = "Order failed") {
 
 export function McxSandboxOrderPage({ accessToken }) {
   const [optionType, setOptionType] = useState("CE");
-  const [baseKey, setBaseKey] = useState(DEFAULT_BASE_KEY);
+  const [baseKey, setBaseKey] = useState("");
   const [loading, setLoading] = useState(false);
   const [ladder, setLadder] = useState(null);
   const [placingSlot, setPlacingSlot] = useState("");
@@ -23,19 +22,21 @@ export function McxSandboxOrderPage({ accessToken }) {
   const [publicIp, setPublicIp] = useState("");
   const [logs, setLogs] = useState([]);
   const [logStats, setLogStats] = useState({ total: 0, success: 0, failed: 0 });
+  const mountedRef = useRef(false);
 
-  const loadLadder = async () => {
+  const loadLadder = async (overrideKey) => {
     setLoading(true);
     setStatus({ kind: "", text: "" });
     try {
-      const qs = new URLSearchParams({
-        base_instrument_key: baseKey.trim() || DEFAULT_BASE_KEY,
-        option_type: optionType,
-      });
+      const key = (overrideKey || baseKey).trim();
+      const qs = new URLSearchParams({ option_type: optionType });
+      if (key) qs.set("base_instrument_key", key);
       const res = await apiFetch(`/api/tools/mcx-sandbox-ladder?${qs.toString()}`, { accessToken });
       const json = await res.json();
       if (!res.ok || json?.status !== "success") throw new Error(extractReason(json, "Failed to load ladder"));
       setLadder(json.data);
+      // Keep displayed key in sync with what the server actually resolved
+      if (json.data?.base?.instrument_key) setBaseKey(json.data.base.instrument_key);
     } catch (e) {
       setLadder(null);
       setStatus({ kind: "error", text: e.message || "Failed to load ladder" });
@@ -44,7 +45,30 @@ export function McxSandboxOrderPage({ accessToken }) {
     }
   };
 
+  // On mount: discover the current valid MCX base key, then load the ladder
   useEffect(() => {
+    const init = async () => {
+      try {
+        const res = await apiFetch("/api/tools/discover-mcx-base", { accessToken });
+        const json = await res.json();
+        if (res.ok && json?.status === "success" && json?.data?.instrument_key) {
+          const key = json.data.instrument_key;
+          setBaseKey(key);
+          await loadLadder(key);
+        } else {
+          await loadLadder();
+        }
+      } catch {
+        await loadLadder();
+      }
+    };
+    init();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Reload when option type changes (skip initial mount — handled above)
+  useEffect(() => {
+    if (!mountedRef.current) { mountedRef.current = true; return; }
     loadLadder();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [optionType]);
@@ -148,7 +172,7 @@ export function McxSandboxOrderPage({ accessToken }) {
       </div>
 
       <div className="mcx-meta">
-        <span>Default base: {DEFAULT_BASE_KEY}</span>
+        {ladder?.base?.name ? <span>Base: {ladder.base.name} ({ladder.base.trading_symbol})</span> : null}
         {ladder?.base?.ltp ? <span>Spot: {Number(ladder.base.ltp).toFixed(2)}</span> : null}
         {ladder?.atm_strike ? <span>ATM: {ladder.atm_strike}</span> : null}
         <span>Tracked: {logStats.total} (OK {logStats.success} / Fail {logStats.failed})</span>
