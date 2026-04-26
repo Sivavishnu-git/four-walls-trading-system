@@ -170,11 +170,15 @@ jobs:
           npm install --omit=dev
 
           DOMAIN="${NGINX_DOMAIN:-app.fourwalls-trading.biz}"
-          sed "s/DOMAIN_PLACEHOLDER/${DOMAIN}/g" deploy/nginx.conf | sudo tee /etc/nginx/sites-available/livetrading > /dev/null
-          sudo ln -sf /etc/nginx/sites-available/livetrading /etc/nginx/sites-enabled/livetrading
-          sudo rm -f /etc/nginx/sites-enabled/default
-          sudo nginx -t
-          sudo systemctl reload nginx
+          if [ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]; then
+            sed "s/DOMAIN_PLACEHOLDER/${DOMAIN}/g" deploy/nginx.conf | sudo tee /etc/nginx/sites-available/livetrading > /dev/null
+            sudo ln -sf /etc/nginx/sites-available/livetrading /etc/nginx/sites-enabled/livetrading
+            sudo rm -f /etc/nginx/sites-enabled/default
+            sudo nginx -t
+            sudo systemctl reload nginx
+          else
+            echo "⚠️ SSL cert not found for ${DOMAIN} — skipping nginx config update (existing config preserved)"
+          fi
 
           pm2 delete livetrading 2>/dev/null || true
           pm2 start deploy/ecosystem.config.cjs
