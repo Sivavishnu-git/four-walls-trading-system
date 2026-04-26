@@ -169,7 +169,8 @@ jobs:
           cd "$HOME/app" || cd /home/ubuntu/app
           npm install --omit=dev
 
-          sudo cp deploy/nginx.conf /etc/nginx/sites-available/livetrading
+          DOMAIN="${NGINX_DOMAIN:-app.fourwalls-trading.biz}"
+          sed "s/DOMAIN_PLACEHOLDER/${DOMAIN}/g" deploy/nginx.conf | sudo tee /etc/nginx/sites-available/livetrading > /dev/null
           sudo ln -sf /etc/nginx/sites-available/livetrading /etc/nginx/sites-enabled/livetrading
           sudo rm -f /etc/nginx/sites-enabled/default
           sudo nginx -t
