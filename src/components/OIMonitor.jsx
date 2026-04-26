@@ -12,8 +12,8 @@ import { apiFetch } from "../api/client.js";
 // import { MarketTrendAnalysis } from './MarketTrendAnalysis';
 // import { OptionEntryPlanner } from './OptionEntryPlanner';
 
-/** Number of past trading days to load from DB on mount. */
-const OI_HISTORY_DAYS = 5;
+/** Number of most-recent OI snapshots to load from DB on mount. */
+const OI_HISTORY_ROWS = 5;
 /** DB symbol name for the default Nifty futures instrument. */
 const OI_DB_SYMBOL = import.meta.env.VITE_OI_SYMBOL || "NIFTY";
 
@@ -39,7 +39,7 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
     // Load last 5 trading days from DB on mount and whenever the instrument key changes.
     // localStorage is not used — DB is the single source of truth.
     useEffect(() => {
-        apiFetch(`/api/oi/history?days=${OI_HISTORY_DAYS}`)
+        apiFetch(`/api/oi/history?limit=${OI_HISTORY_ROWS}`)
             .then((r) => r.json())
             .then(({ data }) => {
                 if (!Array.isArray(data) || data.length === 0) return;
@@ -616,7 +616,7 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
                     <h2>OI Change History</h2>
                     <div className="refresh-indicator">
                         <RefreshCw size={16} className={isLive ? "spinning" : ""} />
-                        <span>Last {OI_HISTORY_DAYS} trading days · every 3 min · latest first</span>
+                        <span>Last {OI_HISTORY_ROWS} snapshots · every 3 min · latest first</span>
                     </div>
                 </div>
 

@@ -272,7 +272,7 @@ export function getOIHistory({ symbol, date, limit = 1000, days }) {
     ).all(symbol, limit);
   }
   return db.prepare(
-    "SELECT * FROM future_oi ORDER BY ts ASC LIMIT ?"
+    "SELECT * FROM future_oi ORDER BY ts DESC LIMIT ?"
   ).all(limit);
 }
 
