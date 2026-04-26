@@ -142,6 +142,15 @@ function PivotRow({ name, value, color, ltp, isCenter }) {
   );
 }
 
+function todayIST() {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }); // YYYY-MM-DD
+}
+
+function fmtOI(n) {
+  if (n == null || !Number.isFinite(Number(n))) return "—";
+  return Number(n).toLocaleString("en-IN");
+}
+
 // ── main ─────────────────────────────────────────────────────────────────────
 export function PivotCalculatorPage({ accessToken }) {
   const [phase, setPhase]           = useState(getPhase());
@@ -154,6 +163,13 @@ export function PivotCalculatorPage({ accessToken }) {
   const [pivots, setPivots]         = useState(null);
   const [ltp, setLtp]               = useState(null);
   const [ltpOI, setLtpOI]          = useState(null);
+
+  // ── sentiment state ───────────────────────────────────────────────────────
+  const [sentDate, setSentDate]       = useState(todayIST);
+  const [sentLoading, setSentLoading] = useState(false);
+  const [sentError, setSentError]     = useState(null);
+  const [sentiment, setSentiment]     = useState(null);
+  const [trend, setTrend]             = useState(null);
 
   const timerRef = useRef(null);
 
@@ -208,6 +224,31 @@ export function PivotCalculatorPage({ accessToken }) {
       setLoading(false);
     }
   }
+
+  // ── sentiment fetch ───────────────────────────────────────────────────────
+  async function loadSentiment(date) {
+    if (!accessToken) return;
+    setSentLoading(true);
+    setSentError(null);
+    try {
+      const res  = await apiFetch(`/api/sentiment?date=${date || sentDate}`, { accessToken });
+      const json = await res.json();
+      if (!res.ok || json.status !== "success") throw new Error(json.error || `HTTP ${res.status}`);
+      setSentiment(json.data.sentiment);
+      setTrend(json.data.trend);
+    } catch (e) {
+      setSentError(e.message);
+      setSentiment(null);
+      setTrend(null);
+    } finally {
+      setSentLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (accessToken) loadSentiment(sentDate);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accessToken, sentDate]);
 
   // ── auto-refresh ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -427,11 +468,154 @@ export function PivotCalculatorPage({ accessToken }) {
         </div>
       )}
 
+      {/* ── Market Sentiment ─────────────────────────────────────────────── */}
+      <div style={{ marginTop: 22 }}>
+        {/* header + date picker */}
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          flexWrap: "wrap", gap: 10, marginBottom: 12,
+        }}>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: "0.95rem", color: "#fff" }}>
+              Market Sentiment &amp; Trend
+            </div>
+            <div style={{ fontSize: "0.72rem", color: DIM, marginTop: 2 }}>
+              9:15–9:30 OI &amp; LTP analysis · Dow Theory (last 5 daily candles)
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input
+              type="date"
+              value={sentDate}
+              max={todayIST()}
+              onChange={(e) => setSentDate(e.target.value)}
+              style={{
+                background: CARD, border: `1px solid ${BORDER}`, borderRadius: 6,
+                color: TEXT, fontSize: "0.8rem", padding: "5px 10px", outline: "none",
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => loadSentiment(sentDate)}
+              disabled={sentLoading}
+              style={{
+                padding: "5px 14px",
+                background: sentLoading ? "rgba(255,255,255,0.04)" : `${PURPLE}22`,
+                border: `1px solid ${PURPLE}44`,
+                borderRadius: 6, color: PURPLE,
+                fontSize: "0.75rem", fontWeight: 700, cursor: sentLoading ? "wait" : "pointer",
+              }}
+            >
+              {sentLoading ? "Loading…" : "Fetch"}
+            </button>
+          </div>
+        </div>
+
+        {sentError && (
+          <div style={{
+            ...card, marginBottom: 12,
+            background: "rgba(239,83,80,0.08)", border: `1px solid ${RED}44`,
+            color: RED, fontSize: "0.8rem",
+          }}>{sentError}</div>
+        )}
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+
+          {/* Sentiment card */}
+          <div style={{
+            ...card,
+            borderColor: sentiment ? `${sentiment.color}55` : BORDER,
+            background: sentiment ? `${sentiment.color}0d` : CARD,
+          }}>
+            <div style={label}>Opening Sentiment (9:15–9:30)</div>
+            {sentiment ? (
+              <>
+                <div style={{
+                  fontSize: "1.2rem", fontWeight: 800,
+                  color: sentiment.color, marginBottom: 6,
+                }}>
+                  {sentiment.type}
+                </div>
+                <div style={{ fontSize: "0.75rem", color: DIM, marginBottom: 10, lineHeight: 1.5 }}>
+                  {sentiment.description}
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                  {[
+                    { l: "LTP at 9:15", v: fmt(sentiment.ltp_start) },
+                    { l: "LTP at 9:30", v: fmt(sentiment.ltp_end) },
+                    { l: "LTP Change",  v: `${sentiment.ltp_change >= 0 ? "+" : ""}${fmt(sentiment.ltp_change)}`,
+                      c: sentiment.ltp_change >= 0 ? GREEN : RED },
+                    { l: "OI at 9:15", v: fmtOI(sentiment.oi_start) },
+                    { l: "OI at 9:30", v: fmtOI(sentiment.oi_end) },
+                    { l: "OI Change",  v: `${sentiment.oi_change >= 0 ? "+" : ""}${fmtOI(sentiment.oi_change)}`,
+                      c: sentiment.oi_change >= 0 ? RED : GREEN },
+                  ].map(({ l, v, c }) => (
+                    <div key={l} style={{ display: "flex", justifyContent: "space-between", fontSize: "0.78rem" }}>
+                      <span style={{ color: DIM }}>{l}</span>
+                      <span style={{ fontFamily: "ui-monospace,monospace", fontWeight: 700, color: c || TEXT }}>{v}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div style={{ color: DIM, fontSize: "0.8rem", marginTop: 8 }}>
+                {sentLoading ? "Fetching candle data…" : "No 9:15–9:30 candle data for this date."}
+              </div>
+            )}
+          </div>
+
+          {/* Dow Theory card */}
+          <div style={{
+            ...card,
+            borderColor: trend ? `${trend.color}55` : BORDER,
+            background: trend ? `${trend.color}0d` : CARD,
+          }}>
+            <div style={label}>Trend — Dow Theory</div>
+            {trend ? (
+              <>
+                <div style={{
+                  fontSize: "1.2rem", fontWeight: 800,
+                  color: trend.color, marginBottom: 6,
+                }}>
+                  {trend.direction === "Uptrend"   ? "▲ Uptrend"   :
+                   trend.direction === "Downtrend" ? "▼ Downtrend" :
+                                                     "↔ Sideways"}
+                </div>
+                <div style={{ fontSize: "0.75rem", color: DIM, marginBottom: 10 }}>
+                  {trend.description}
+                </div>
+                <div style={{ fontSize: "0.72rem", color: DIM, marginBottom: 6 }}>
+                  Last 3 daily candles:
+                </div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  {trend.recent_highs.map((h, i) => (
+                    <div key={i} style={{
+                      flex: 1, background: "rgba(255,255,255,0.04)",
+                      borderRadius: 6, padding: "6px 8px", textAlign: "center",
+                    }}>
+                      <div style={{ fontSize: "0.62rem", color: DIM, marginBottom: 2 }}>D-{trend.recent_highs.length - i}</div>
+                      <div style={{ fontSize: "0.7rem", color: GREEN, fontFamily: "ui-monospace,monospace" }}>H {fmt(h)}</div>
+                      <div style={{ fontSize: "0.7rem", color: RED,   fontFamily: "ui-monospace,monospace" }}>L {fmt(trend.recent_lows[i])}</div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div style={{ color: DIM, fontSize: "0.8rem", marginTop: 8 }}>
+                {sentLoading ? "Fetching daily candles…" : "Not enough daily candle data."}
+              </div>
+            )}
+          </div>
+
+        </div>
+      </div>
+
       <style>{`
         @keyframes pulse {
           0%,100% { opacity:1; }
           50%      { opacity:0.25; }
         }
+        input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); }
       `}</style>
     </div>
   );
