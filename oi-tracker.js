@@ -239,7 +239,23 @@ export function saveOISnapshot({ ts, symbol, oi, ltp, exchange = "NFO", expiry =
 }
 
 // ── Read API helpers (used by /api/oi/history endpoint) ───────────────────────
-export function getOIHistory({ symbol, date, limit = 200 }) {
+export function getOIHistory({ symbol, date, limit = 1000, days }) {
+  // Last N distinct trading dates (most recent first from DB, then re-sorted ASC)
+  if (days) {
+    const tradingDates = db.prepare(
+      "SELECT DISTINCT date FROM future_oi ORDER BY date DESC LIMIT ?"
+    ).all(days).map((r) => r.date);
+    if (tradingDates.length === 0) return [];
+    const ph = tradingDates.map(() => "?").join(",");
+    if (symbol) {
+      return db.prepare(
+        `SELECT * FROM future_oi WHERE symbol = ? AND date IN (${ph}) ORDER BY ts ASC LIMIT ?`
+      ).all(symbol, ...tradingDates, limit);
+    }
+    return db.prepare(
+      `SELECT * FROM future_oi WHERE date IN (${ph}) ORDER BY ts ASC LIMIT ?`
+    ).all(...tradingDates, limit);
+  }
   if (symbol && date) {
     return db.prepare(
       "SELECT * FROM future_oi WHERE symbol = ? AND date = ? ORDER BY ts ASC LIMIT ?"
@@ -252,11 +268,11 @@ export function getOIHistory({ symbol, date, limit = 200 }) {
   }
   if (symbol) {
     return db.prepare(
-      "SELECT * FROM future_oi WHERE symbol = ? ORDER BY ts DESC LIMIT ?"
+      "SELECT * FROM future_oi WHERE symbol = ? ORDER BY ts ASC LIMIT ?"
     ).all(symbol, limit);
   }
   return db.prepare(
-    "SELECT * FROM future_oi ORDER BY ts DESC LIMIT ?"
+    "SELECT * FROM future_oi ORDER BY ts ASC LIMIT ?"
   ).all(limit);
 }
 

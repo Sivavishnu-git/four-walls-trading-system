@@ -1954,8 +1954,13 @@ app.get("/api/oi/latest", (_req, res) => {
 
 app.get("/api/oi/history", (req, res) => {
   try {
-    const { symbol, date, limit } = req.query;
-    const rows = getOIHistory({ symbol, date, limit: limit ? Number(limit) : 200 });
+    const { symbol, date, limit, days } = req.query;
+    const rows = getOIHistory({
+      symbol,
+      date,
+      limit: limit ? Number(limit) : 1000,
+      days:  days  ? Number(days)  : undefined,
+    });
     res.json({ status: "success", data: rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

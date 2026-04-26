@@ -12,84 +12,15 @@ import { apiFetch } from "../api/client.js";
 // import { MarketTrendAnalysis } from './MarketTrendAnalysis';
 // import { OptionEntryPlanner } from './OptionEntryPlanner';
 
-const OI_HISTORY_STORAGE_PREFIX = "oi_change_history:";
-/** Max 3‑minute snapshots kept in memory + localStorage (200 ≈ 10 hours). */
-const OI_HISTORY_MAX_ROWS = 200;
-/** Rows shown in the history table (full history kept in state for calculations). */
-const OI_DISPLAY_ROWS = 10;
+/** Number of past trading days to load from DB on mount. */
+const OI_HISTORY_DAYS = 5;
 /** DB symbol name for the default Nifty futures instrument. */
 const OI_DB_SYMBOL = import.meta.env.VITE_OI_SYMBOL || "NIFTY";
-
-function getOiHistoryStorageKey(instrumentKey) {
-    return `${OI_HISTORY_STORAGE_PREFIX}${instrumentKey}`;
-}
-
-function serializeOiHistory(entries) {
-    return JSON.stringify(
-        entries.map((e) => ({
-            time: e.time,
-            oi: e.oi,
-            ltp: e.ltp,
-            change: e.change,
-            changePercent: e.changePercent,
-            fullTime:
-                e.fullTime instanceof Date ? e.fullTime.toISOString() : String(e.fullTime),
-        })),
-    );
-}
-
-function deserializeOiHistory(json) {
-    if (!json) return [];
-    try {
-        const raw = JSON.parse(json);
-        if (!Array.isArray(raw)) return [];
-        const todayStr = new Date().toDateString();
-        return raw
-            .map((row) => ({
-                time: row.time,
-                oi: row.oi,
-                ltp: row.ltp,
-                change: row.change,
-                changePercent: row.changePercent,
-                fullTime: row.fullTime ? new Date(row.fullTime) : new Date(),
-            }))
-            // Only keep entries from today's trading session
-            .filter((row) => row.fullTime.toDateString() === todayStr)
-            .slice(0, OI_HISTORY_MAX_ROWS);
-    } catch {
-        return [];
-    }
-}
-
-function loadOiHistoryFromStorage(instrumentKey) {
-    if (!instrumentKey) return [];
-    try {
-        return deserializeOiHistory(localStorage.getItem(getOiHistoryStorageKey(instrumentKey)));
-    } catch {
-        return [];
-    }
-}
-
-function saveOiHistoryToStorage(instrumentKey, entries) {
-    if (!instrumentKey) return;
-    try {
-        localStorage.setItem(
-            getOiHistoryStorageKey(instrumentKey),
-            serializeOiHistory(entries.slice(-OI_HISTORY_MAX_ROWS)),
-        );
-    } catch {
-        /* quota / private mode */
-    }
-}
 
 export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
     const { accessToken: token, loginWithUpstox } = useAuth();
     const [isLive, setIsLive] = useState(false);
-    const [oiHistory, setOiHistory] = useState(() =>
-        loadOiHistoryFromStorage(
-            propInstrumentKey || import.meta.env.VITE_INSTRUMENT_KEY || "",
-        ),
-    );
+    const [oiHistory, setOiHistory] = useState([]);
     const [currentOI, setCurrentOI] = useState(null);
     const [oiTrend5Min, setOiTrend5Min] = useState(null);
     const firstSessionOIRef = useRef(null);
@@ -105,56 +36,30 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
         if (propInstrumentKey) setInstrumentKey(propInstrumentKey);
     }, [propInstrumentKey]);
 
+    // Load last 5 trading days from DB on mount and whenever the instrument key changes.
+    // localStorage is not used — DB is the single source of truth.
     useEffect(() => {
-        const fromStorage = loadOiHistoryFromStorage(instrumentKey);
-        // Always fetch today's full history from DB so snapshots captured while the
-        // app was closed are not missing. Merge with any live localStorage entries
-        // that are newer than the last DB snapshot.
-        const todayISO = new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD (matches DB date column)
-        apiFetch(`/api/oi/history?date=${todayISO}&limit=200`)
+        apiFetch(`/api/oi/history?days=${OI_HISTORY_DAYS}`)
             .then((r) => r.json())
             .then(({ data }) => {
-                if (!Array.isArray(data) || data.length === 0) {
-                    if (fromStorage.length > 0) setOiHistory(fromStorage);
-                    return;
-                }
-                const todayStr = new Date().toDateString();
-                const fromDB = data
-                    .map((row) => {
-                        const fullTime = new Date(row.ts);
-                        const prevOI   = row.oi - row.oi_change;
-                        return {
-                            time:          row.time,
-                            oi:            row.oi,
-                            ltp:           row.ltp,
-                            change:        row.oi_change,
-                            changePercent: prevOI > 0 ? +((row.oi_change / prevOI) * 100).toFixed(2) : 0,
-                            fullTime,
-                        };
-                    })
-                    .filter((r) => r.fullTime.toDateString() === todayStr);
-
-                if (fromDB.length === 0) {
-                    if (fromStorage.length > 0) setOiHistory(fromStorage);
-                    return;
-                }
-
-                // Append any live localStorage entries that arrived after the last DB snapshot
-                const lastDBTime = fromDB[fromDB.length - 1].fullTime.getTime();
-                const newerFromStorage = fromStorage.filter(
-                    (r) => r.fullTime instanceof Date && r.fullTime.getTime() > lastDBTime,
-                );
-                const merged = [...fromDB, ...newerFromStorage].slice(-OI_HISTORY_MAX_ROWS);
-                setOiHistory(merged);
+                if (!Array.isArray(data) || data.length === 0) return;
+                const rows = data.map((row) => {
+                    const fullTime = new Date(row.ts);
+                    const prevOI   = row.oi - row.oi_change;
+                    return {
+                        time:          row.time,
+                        date:          row.date,
+                        oi:            row.oi,
+                        ltp:           row.ltp,
+                        change:        row.oi_change,
+                        changePercent: prevOI > 0 ? +((row.oi_change / prevOI) * 100).toFixed(2) : 0,
+                        fullTime,
+                    };
+                });
+                setOiHistory(rows); // already in ascending (chronological) order from DB
             })
-            .catch(() => {
-                if (fromStorage.length > 0) setOiHistory(fromStorage);
-            });
+            .catch(() => {}); // silently ignore; table stays empty until next retry
     }, [instrumentKey]);
-
-    useEffect(() => {
-        saveOiHistoryToStorage(instrumentKey, oiHistory);
-    }, [oiHistory, instrumentKey]);
 
     const {
         connect,
@@ -260,17 +165,17 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
                         lastOI !== 0 ? ((oi - lastOI) / lastOI) * 100 : 0;
                 }
                 updated.push(newEntry);
-                return updated.slice(-OI_HISTORY_MAX_ROWS);
+                return updated; // no in-memory cap — DB is the source of truth
             });
 
             setCurrentOI(oi);
 
-            // Persist this snapshot to the server DB so it survives localStorage clears
+            // Persist this snapshot to the server DB
             apiFetch("/api/oi/save", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ ts: timestamp.getTime(), symbol: OI_DB_SYMBOL, oi, ltp }),
-            }).catch(() => { /* fire-and-forget — localStorage is the fallback */ });
+            }).catch(() => { /* fire-and-forget */ });
         };
 
         const setupSyncTimer = () => {
@@ -711,10 +616,7 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
                     <h2>OI Change History</h2>
                     <div className="refresh-indicator">
                         <RefreshCw size={16} className={isLive ? "spinning" : ""} />
-                        <span>
-                            Up to {OI_HISTORY_MAX_ROWS} rows, every 3 minutes — saved in this browser
-                            (survives refresh)
-                        </span>
+                        <span>Last {OI_HISTORY_DAYS} trading days · every 3 min · chronological</span>
                     </div>
                 </div>
 
@@ -728,6 +630,7 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
                         <table className="oi-table oi-table-compact">
                             <thead>
                                 <tr>
+                                    <th>Date</th>
                                     <th>Time</th>
                                     <th>Open Interest</th>
                                     <th>Change</th>
@@ -736,15 +639,16 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
                                 </tr>
                             </thead>
                             <tbody>
-                                {[...oiHistory].reverse().slice(0, OI_DISPLAY_ROWS).map((entry, index) => (
+                                {oiHistory.map((entry, index) => (
                                     <tr
                                         key={
                                             entry.fullTime instanceof Date
                                                 ? entry.fullTime.toISOString()
                                                 : `${entry.time}-${index}`
                                         }
-                                        className={index === 0 ? "latest-row" : ""}
+                                        className={index === oiHistory.length - 1 ? "latest-row" : ""}
                                     >
+                                        <td className="time-cell">{entry.date || ""}</td>
                                         <td className="time-cell">{entry.time}</td>
                                         <td className="oi-cell">{formatNumber(entry.oi)}</td>
                                         <td
