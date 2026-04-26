@@ -1943,6 +1943,136 @@ if (IS_PROD) {
   }
 }
 
+// ── Market Sentiment (9:15–9:30 OI+LTP analysis) + Dow Theory trend ──────────
+// GET /api/sentiment?date=YYYY-MM-DD
+app.get("/api/sentiment", async (req, res) => {
+  try {
+    const accessToken = req.headers.authorization || FALLBACK_ACCESS_TOKEN;
+    if (!accessToken) return res.status(400).json({ error: "Missing access token" });
+
+    const istDate = (d) =>
+      new Date(d).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+    const todayIST = istDate(Date.now());
+    const date = (req.query.date || todayIST).trim();
+
+    // Resolve nearest-expiry Nifty future
+    const allData = await loadCompleteData();
+    if (!allData) return res.status(503).json({ error: "Could not load master list" });
+    const fut = allData
+      .filter((i) => i.segment === "NSE_FO" && i.name === "NIFTY" && i.instrument_type === "FUT")
+      .sort((a, b) => new Date(a.expiry) - new Date(b.expiry))[0];
+    if (!fut) return res.status(404).json({ error: "Nifty future not found" });
+    const futKey = fut.instrument_key;
+
+    // Fetch 1-minute candles for the requested date
+    const isToday = date === todayIST;
+    let candles = [];
+    try {
+      if (isToday) {
+        const r = await axios.get(
+          `https://api.upstox.com/v2/historical-candle/intraday/${encodeURIComponent(futKey)}/1minute`,
+          { headers: { Authorization: accessToken, Accept: "application/json" }, timeout: 10000 },
+        );
+        candles = r.data?.data?.candles || [];
+      } else {
+        const r = await axios.get(
+          `https://api.upstox.com/v2/historical-candle/${encodeURIComponent(futKey)}/1minute/${date}/${date}`,
+          { headers: { Authorization: accessToken, Accept: "application/json" }, timeout: 10000 },
+        );
+        candles = r.data?.data?.candles || [];
+      }
+    } catch (e) {
+      console.error("Sentiment 1min candle fetch error:", e.message);
+    }
+
+    // Filter 09:15–09:29 window (candle format: [ts, O, H, L, C, V, OI])
+    const window915 = candles
+      .filter((c) => {
+        const t = String(c[0]).includes("T") ? String(c[0]).split("T")[1].substring(0, 5) : "";
+        return t >= "09:15" && t <= "09:29";
+      })
+      .sort((a, b) => new Date(a[0]) - new Date(b[0]));
+
+    let sentiment = null;
+    if (window915.length >= 1) {
+      const first = window915[0];
+      const last  = window915[window915.length - 1];
+      const ltpStart = Number(first[1]); // open of 9:15 candle
+      const ltpEnd   = Number(last[4]);  // close of last candle (≈9:30)
+      const oiStart  = Number(first[6]);
+      const oiEnd    = Number(last[6]);
+      const ltpUp    = ltpEnd > ltpStart;
+      const oiUp     = oiEnd  > oiStart;
+
+      let type, color, description;
+      if (oiUp && ltpUp) {
+        type = "Long Build Up"; color = "#26a69a";
+        description = "Buyers continuously building positions — price rising with OI";
+      } else if (oiUp && !ltpUp) {
+        type = "Short Build Up"; color = "#ef5350";
+        description = "Sellers continuously building positions — price falling with OI";
+      } else if (!oiUp && ltpUp) {
+        type = "Short Covering"; color = "#2196f3";
+        description = "Shorts covering their positions — price rising as sellers exit";
+      } else {
+        type = "Profit Booking"; color = "#ff7043";
+        description = "Longs closing positions — price falling as buyers exit";
+      }
+      sentiment = {
+        type, color, description,
+        ltp_start: ltpStart, ltp_end: ltpEnd, ltp_change: ltpEnd - ltpStart,
+        oi_start:  oiStart,  oi_end:  oiEnd,  oi_change:  oiEnd - oiStart,
+        candles_in_window: window915.length,
+      };
+    }
+
+    // Daily candles for Dow Theory (last 20 calendar days)
+    const fromIST = istDate(Date.now() - 20 * 24 * 60 * 60 * 1000);
+    let dailyCandles = [];
+    try {
+      const dr = await axios.get(
+        `https://api.upstox.com/v2/historical-candle/${encodeURIComponent(futKey)}/day/${todayIST}/${fromIST}`,
+        { headers: { Authorization: accessToken, Accept: "application/json" }, timeout: 10000 },
+      );
+      dailyCandles = (dr.data?.data?.candles || []).sort((a, b) => new Date(a[0]) - new Date(b[0]));
+    } catch (e) {
+      console.error("Sentiment daily candle fetch error:", e.message);
+    }
+
+    let trend = null;
+    if (dailyCandles.length >= 4) {
+      const recent = dailyCandles.slice(-5);
+      const n      = recent.length;
+      const highs  = recent.map((c) => Number(c[2]));
+      const lows   = recent.map((c) => Number(c[3]));
+      const hh = highs[n-1] > highs[n-2] && highs[n-2] > highs[n-3];
+      const hl = lows[n-1]  > lows[n-2]  && lows[n-2]  > lows[n-3];
+      const lh = highs[n-1] < highs[n-2] && highs[n-2] < highs[n-3];
+      const ll = lows[n-1]  < lows[n-2]  && lows[n-2]  < lows[n-3];
+
+      let direction, color, description;
+      if (hh && hl)       { direction = "Uptrend";   color = "#26a69a"; description = "Higher Highs & Higher Lows"; }
+      else if (lh && ll)  { direction = "Downtrend"; color = "#ef5350"; description = "Lower Highs & Lower Lows"; }
+      else                { direction = "Sideways";  color = "#ffc107"; description = "No clear HH/HL or LH/LL pattern"; }
+
+      trend = {
+        direction, color, description,
+        recent_highs: highs.slice(-3),
+        recent_lows:  lows.slice(-3),
+        daily_candles_used: dailyCandles.length,
+      };
+    }
+
+    res.json({
+      status: "success",
+      data: { date, instrument: { key: futKey, symbol: fut.trading_symbol }, sentiment, trend },
+    });
+  } catch (error) {
+    console.error("Sentiment error:", error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ── Future OI History API ─────────────────────────────────────────────────────
 // GET  /api/oi/latest              → latest snapshot for all 3 futures
 // GET  /api/oi/history?symbol=NIFTY&date=2025-06-16&limit=100
