@@ -1107,7 +1107,45 @@ function buildMoneynessSlots(strikesAsc, atmStrike, optionType) {
   };
 }
 
-// MCX sandbox ladder for base instrument (default MCX_FO|554671)
+// Auto-discover nearest-expiry MCX FUT for a given underlying name (default CRUDEOIL)
+app.get("/api/tools/discover-mcx-base", async (req, res) => {
+  try {
+    const targetName = String(req.query.name || "CRUDEOIL").toUpperCase().trim();
+    const allData = await loadCompleteData();
+    if (!allData) return res.status(503).json({ error: "Could not load master list" });
+
+    const mcxFuts = allData.filter(
+      (i) => i.segment === "MCX_FO" && i.instrument_type === "FUT" && String(i.name || "").toUpperCase() === targetName,
+    );
+    if (mcxFuts.length === 0) {
+      return res.status(404).json({ error: `No MCX FUT found for name: ${targetName}` });
+    }
+
+    const now = Date.now();
+    const nearest =
+      mcxFuts
+        .map((f) => ({ ...f, _expiryMs: parseExpiryMs(f.expiry) }))
+        .filter((f) => Number.isFinite(f._expiryMs) && f._expiryMs >= now)
+        .sort((a, b) => a._expiryMs - b._expiryMs)[0] ||
+      [...mcxFuts].sort((a, b) => parseExpiryMs(b.expiry) - parseExpiryMs(a.expiry))[0];
+
+    res.json({
+      status: "success",
+      data: {
+        instrument_key: nearest.instrument_key,
+        trading_symbol: nearest.trading_symbol,
+        name: nearest.name,
+        segment: nearest.segment,
+        expiry: nearest.expiry,
+      },
+    });
+  } catch (error) {
+    console.error("MCX discover error:", error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// MCX sandbox ladder for base instrument (default CRUDEOIL nearest expiry, auto-discovered)
 app.get("/api/tools/mcx-sandbox-ladder", async (req, res) => {
   try {
     const accessToken = req.headers.authorization || FALLBACK_ACCESS_TOKEN;
@@ -1117,13 +1155,24 @@ app.get("/api/tools/mcx-sandbox-ladder", async (req, res) => {
       });
     }
 
-    const baseInstrumentKey = String(req.query.base_instrument_key || DEFAULT_MCX_BASE_KEY).trim();
+    let baseInstrumentKey = String(req.query.base_instrument_key || DEFAULT_MCX_BASE_KEY).trim();
     const optionType = String(req.query.option_type || "CE").toUpperCase() === "PE" ? "PE" : "CE";
     const allData = await loadCompleteData();
     if (!allData) return res.status(503).json({ error: "Could not load master list" });
 
-    const base = allData.find((i) => i.instrument_key === baseInstrumentKey);
-    if (!base) return res.status(404).json({ error: `Base instrument not found: ${baseInstrumentKey}` });
+    let base = allData.find((i) => i.instrument_key === baseInstrumentKey);
+    if (!base) {
+      // Key is stale (contract rolled over) — auto-discover nearest MCX FUT
+      console.warn(`MCX base key not found: ${baseInstrumentKey} — auto-discovering nearest MCX FUT`);
+      const now = Date.now();
+      base = allData
+        .filter((i) => i.segment === "MCX_FO" && i.instrument_type === "FUT")
+        .map((f) => ({ ...f, _expiryMs: parseExpiryMs(f.expiry) }))
+        .filter((f) => Number.isFinite(f._expiryMs) && f._expiryMs >= now)
+        .sort((a, b) => a._expiryMs - b._expiryMs)[0] || null;
+      if (!base) return res.status(404).json({ error: `Base instrument not found: ${baseInstrumentKey}` });
+      baseInstrumentKey = base.instrument_key;
+    }
 
     const baseName = base.name;
     const mcxOptions = allData.filter((i) =>
