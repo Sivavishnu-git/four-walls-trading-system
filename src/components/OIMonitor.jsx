@@ -616,7 +616,7 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
                     <h2>OI Change History</h2>
                     <div className="refresh-indicator">
                         <RefreshCw size={16} className={isLive ? "spinning" : ""} />
-                        <span>Last {OI_HISTORY_DAYS} trading days · every 3 min · chronological</span>
+                        <span>Last {OI_HISTORY_DAYS} trading days · every 3 min · latest first</span>
                     </div>
                 </div>
 
@@ -639,14 +639,14 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
                                 </tr>
                             </thead>
                             <tbody>
-                                {oiHistory.map((entry, index) => (
+                                {[...oiHistory].reverse().map((entry, index) => (
                                     <tr
                                         key={
                                             entry.fullTime instanceof Date
                                                 ? entry.fullTime.toISOString()
                                                 : `${entry.time}-${index}`
                                         }
-                                        className={index === oiHistory.length - 1 ? "latest-row" : ""}
+                                        className={index === 0 ? "latest-row" : ""}
                                     >
                                         <td className="time-cell">{entry.date || ""}</td>
                                         <td className="time-cell">{entry.time}</td>
