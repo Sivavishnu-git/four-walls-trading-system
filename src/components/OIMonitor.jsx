@@ -507,7 +507,7 @@ export const OIMonitor = ({ instrumentKey: propInstrumentKey }) => {
                     <div className="stat-label">Data points</div>
                     <div className="stat-value stat-value-compact">{oiHistory.length}</div>
                     <div className="stat-subtitle stat-subtitle-compact">
-                        Up to {OI_HISTORY_MAX_ROWS} snaps · 3 min cadence
+                        Last 5 snapshots · 3 min cadence
                     </div>
                 </div>
             </div>
