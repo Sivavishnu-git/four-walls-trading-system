@@ -12,6 +12,7 @@ import { NiftyATMEntry } from "./components/NiftyATMEntry";
 import { SensexOptionChain } from "./components/SensexOptionChain";
 import { AwsCostAnalysisPage } from "./components/AwsCostAnalysisPage";
 import { SshCommandsPage } from "./components/SshCommandsPage";
+import { StrategyPage } from "./components/StrategyPage";
 
 class TabErrorBoundary extends React.Component {
   state = { hasError: false, error: null };
@@ -383,6 +384,18 @@ function App() {
             >
               SSH
             </button>
+            <button
+              type="button"
+              onClick={() => setActivePage("strategy")}
+              style={{
+                padding: "6px 10px",
+                fontSize: "0.72rem",
+                background: activePage === "strategy" ? "rgba(41,98,255,0.22)" : "rgba(255,255,255,0.08)",
+                border: activePage === "strategy" ? "1px solid rgba(41,98,255,0.45)" : "1px solid rgba(255,255,255,0.16)",
+              }}
+            >
+              Strategy
+            </button>
           </div>
         </div>
 
@@ -457,6 +470,10 @@ function App() {
         ) : activePage === "ssh" ? (
           <TabErrorBoundary>
             <SshCommandsPage />
+          </TabErrorBoundary>
+        ) : activePage === "strategy" ? (
+          <TabErrorBoundary>
+            <StrategyPage accessToken={accessToken} />
           </TabErrorBoundary>
         ) : (
           <>
