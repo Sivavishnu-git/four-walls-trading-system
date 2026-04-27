@@ -168,25 +168,37 @@ export function StrategyPage({ accessToken }) {
     localStorage.removeItem(STORAGE_KEY);
   };
 
+  // safe JSON parse — returns null on HTML/network error instead of throwing
+  async function safeJson(res) {
+    try {
+      const text = await res.text();
+      if (!text || text.trimStart().startsWith("<")) return null;
+      return JSON.parse(text);
+    } catch { return null; }
+  }
+
   // load live signals
   async function loadSignals() {
-    if (!accessToken) return;
     setLoading(true);
     setLoadErr(null);
     try {
       const [oiRes, sentRes, setupRes] = await Promise.all([
-        apiFetch("/api/oi/latest"),
-        apiFetch(`/api/sentiment?date=${todayIST()}`, { accessToken }),
-        apiFetch("/api/trade-setup", { accessToken }),
+        apiFetch("/api/oi/latest").catch(() => null),
+        accessToken ? apiFetch(`/api/sentiment?date=${todayIST()}`, { accessToken }).catch(() => null) : Promise.resolve(null),
+        accessToken ? apiFetch("/api/trade-setup", { accessToken }).catch(() => null) : Promise.resolve(null),
       ]);
 
       const [oiJson, sentJson, setupJson] = await Promise.all([
-        oiRes.json(), sentRes.json(), setupRes.json(),
+        oiRes   ? safeJson(oiRes)   : null,
+        sentRes ? safeJson(sentRes) : null,
+        setupRes ? safeJson(setupRes) : null,
       ]);
 
-      if (oiJson.status === "success")  setOiData(oiJson.data);
-      if (sentJson.status === "success") setSentiment(sentJson.data.sentiment);
-      if (setupJson.status !== "error") setLiveSetup(setupJson.data);
+      if (oiJson?.status === "success")   setOiData(oiJson.data);
+      if (sentJson?.status === "success") setSentiment(sentJson.data.sentiment);
+      if (setupJson?.status !== "error" && setupJson?.data) setLiveSetup(setupJson.data);
+
+      if (!accessToken) setLoadErr("Login with Upstox to load live signals.");
     } catch (e) {
       setLoadErr(e.message);
     } finally {
