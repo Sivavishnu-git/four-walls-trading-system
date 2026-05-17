@@ -1,0 +1,977 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Four Walls Trading — System Architecture Animation</title>
+<style>
+  /* ── Reset & base ────────────────────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg:       #080c18;
+    --panel:    #0e1628;
+    --border:   #1e2d50;
+    --blue:     #3b82f6;
+    --cyan:     #06b6d4;
+    --green:    #22c55e;
+    --yellow:   #eab308;
+    --orange:   #f97316;
+    --purple:   #a855f7;
+    --red:      #ef4444;
+    --text:     #e2e8f0;
+    --muted:    #64748b;
+    --code-bg:  #0d1117;
+  }
+  html, body { height: 100%; background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; overflow: hidden; }
+
+  /* ── Layout ──────────────────────────────────────────────────────────── */
+  #app { display: flex; flex-direction: column; height: 100vh; }
+
+  /* ── Header ──────────────────────────────────────────────────────────── */
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 24px; background: var(--panel); border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .logo { font-size: 1rem; font-weight: 700; color: var(--cyan); letter-spacing: .05em; }
+  .scene-label { font-size: .75rem; color: var(--muted); }
+  .scene-title { font-size: 1rem; font-weight: 600; color: var(--text); }
+
+  /* ── Progress bar ────────────────────────────────────────────────────── */
+  #progress-bar { display: flex; gap: 4px; padding: 8px 24px; background: var(--panel); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .pip { flex: 1; height: 4px; border-radius: 2px; background: var(--border); cursor: pointer; transition: background .3s; }
+  .pip.active { background: var(--cyan); }
+  .pip.done   { background: var(--blue); }
+
+  /* ── Stage ───────────────────────────────────────────────────────────── */
+  #stage { flex: 1; position: relative; overflow: hidden; }
+  .scene { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity .5s; }
+  .scene.active { opacity: 1; pointer-events: all; }
+
+  /* ── Controls ────────────────────────────────────────────────────────── */
+  #controls {
+    display: flex; align-items: center; justify-content: center; gap: 16px;
+    padding: 12px 24px; background: var(--panel); border-top: 1px solid var(--border); flex-shrink: 0;
+  }
+  button {
+    background: var(--border); border: 1px solid var(--border); color: var(--text);
+    padding: 6px 20px; border-radius: 6px; cursor: pointer; font-size: .85rem; transition: background .2s;
+  }
+  button:hover { background: #2a3a5e; }
+  button.primary { background: var(--blue); border-color: var(--blue); color: #fff; }
+  button.primary:hover { background: #2563eb; }
+  #counter { font-size: .8rem; color: var(--muted); min-width: 70px; text-align: center; }
+  #auto-label { font-size: .75rem; color: var(--muted); }
+
+  /* ── Shared component styles ─────────────────────────────────────────── */
+  .box {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 18px; text-align: center;
+  }
+  .box-title { font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: 6px; }
+  .box-name  { font-size: .95rem; font-weight: 700; }
+  .tag       { display: inline-block; font-size: .65rem; padding: 2px 8px; border-radius: 4px; margin-top: 6px; font-weight: 600; }
+
+  .arrow { position: absolute; }
+  .arrow svg { overflow: visible; }
+
+  code { font-family: 'Cascadia Code', 'Fira Code', monospace; }
+
+  /* keyword colours for code blocks */
+  .kw  { color: #ff79c6; }
+  .fn  { color: #50fa7b; }
+  .str { color: #f1fa8c; }
+  .cm  { color: #6272a4; }
+  .num { color: #bd93f9; }
+  .ty  { color: #8be9fd; }
+  .op  { color: #ff79c6; }
+
+  pre {
+    background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px;
+    padding: 14px 18px; font-size: .78rem; line-height: 1.65; overflow-x: auto;
+    text-align: left; white-space: pre;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     SCENE 1 — Overview
+  ═══════════════════════════════════════════════════════════════════════ */
+  #s1 { padding: 20px; }
+  .arch-grid {
+    display: grid;
+    grid-template-columns: 180px 60px 180px 60px 180px 60px 180px;
+    grid-template-rows: auto;
+    align-items: center; gap: 0; max-width: 1100px; width: 100%;
+  }
+  .arch-arrow { display: flex; align-items: center; justify-content: center; }
+  .arch-arrow svg { animation: pulse-arrow 1.8s ease-in-out infinite; }
+  @keyframes pulse-arrow { 0%,100%{opacity:.4} 50%{opacity:1} }
+
+  .box-browser  { border-color: var(--blue);   }
+  .box-proxy    { border-color: var(--cyan);   }
+  .box-tracker  { border-color: var(--green);  }
+  .box-db       { border-color: var(--orange); }
+  .box-upstox   { border-color: var(--purple); }
+  .box-s3       { border-color: var(--yellow); }
+  .box-python   { border-color: var(--red);    }
+
+  .col-blue   { color: var(--blue);   }
+  .col-cyan   { color: var(--cyan);   }
+  .col-green  { color: var(--green);  }
+  .col-orange { color: var(--orange); }
+  .col-purple { color: var(--purple); }
+  .col-yellow { color: var(--yellow); }
+  .col-red    { color: var(--red);    }
+
+  .arch-col { display: flex; flex-direction: column; gap: 12px; }
+  .s1-caption { color: var(--muted); font-size: .8rem; margin-top: 20px; text-align: center; }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     SCENE 2 — React component tree
+  ═══════════════════════════════════════════════════════════════════════ */
+  #s2 { padding: 20px; flex-direction: column; gap: 16px; }
+  .tree { display: flex; flex-direction: column; align-items: center; gap: 0; max-width: 860px; width: 100%; }
+  .tree-row { display: flex; justify-content: center; gap: 20px; width: 100%; position: relative; }
+  .tree-row + .tree-row { margin-top: 4px; }
+  .tree-connector { display: flex; flex-direction: column; align-items: center; }
+  .tree-line { width: 2px; height: 22px; background: var(--border); }
+  .tree-branch { width: 100%; height: 2px; background: var(--border); }
+  .comp { border-radius: 8px; border: 1px solid; padding: 8px 14px; text-align: center; animation: fade-in-up .5s ease both; }
+  .comp-title { font-size: .65rem; color: var(--muted); }
+  .comp-name  { font-size: .82rem; font-weight: 700; }
+  @keyframes fade-in-up { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:none} }
+
+  .hook-row { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; }
+  .hook { border: 1px solid var(--border); border-radius: 6px; padding: 6px 12px; font-size: .75rem; color: var(--muted); }
+  .hook span { color: var(--green); font-weight: 600; }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     SCENE 3 — Auth flow
+  ═══════════════════════════════════════════════════════════════════════ */
+  #s3 { padding: 20px; flex-direction: column; align-items: center; gap: 20px; }
+  .flow-row { display: flex; align-items: center; gap: 0; }
+  .flow-node { border-radius: 10px; border: 1px solid var(--border); padding: 10px 18px; text-align: center; min-width: 130px; }
+  .flow-node .fn-name { font-size: .9rem; font-weight: 700; }
+  .flow-node .fn-sub  { font-size: .68rem; color: var(--muted); margin-top: 3px; }
+  .flow-edge { display: flex; flex-direction: column; align-items: center; min-width: 90px; }
+  .flow-line { height: 2px; width: 90px; background: var(--border); position: relative; }
+  .flow-dot  { width: 10px; height: 10px; border-radius: 50%; background: var(--cyan); position: absolute; top: -4px; left: 0; animation: slide-dot 2s linear infinite; }
+  .flow-label { font-size: .65rem; color: var(--muted); margin-top: 5px; text-align: center; }
+  @keyframes slide-dot { 0%{left:0} 100%{left:80px} }
+
+  .auth-steps { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; max-width: 760px; width: 100%; }
+  .step { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; }
+  .step-num { font-size: .65rem; color: var(--cyan); font-weight: 700; margin-bottom: 4px; }
+  .step-desc { font-size: .78rem; line-height: 1.5; }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     SCENE 4 — Live data flow
+  ═══════════════════════════════════════════════════════════════════════ */
+  #s4 { padding: 20px; flex-direction: column; gap: 20px; align-items: center; }
+  .live-flow { display: flex; align-items: center; gap: 0; }
+  .live-node { border-radius: 10px; border: 1px solid; padding: 12px 18px; text-align: center; min-width: 140px; }
+  .live-arrow { display: flex; flex-direction: column; align-items: center; }
+  .live-line { height: 2px; width: 80px; background: var(--border); position: relative; overflow: hidden; }
+  .live-packet { width: 18px; height: 8px; border-radius: 4px; position: absolute; top: -3px; animation: packet-flow 1.4s linear infinite; }
+  @keyframes packet-flow { 0%{left:-20px;opacity:0} 10%{opacity:1} 90%{opacity:1} 100%{left:80px;opacity:0} }
+  .live-label { font-size: .63rem; color: var(--muted); margin-top: 5px; text-align: center; white-space: nowrap; }
+
+  .capture-box { background: var(--panel); border: 1px solid var(--green); border-radius: 10px; padding: 16px 24px; max-width: 680px; width: 100%; }
+  .capture-title { color: var(--green); font-size: .8rem; font-weight: 700; margin-bottom: 10px; }
+  .capture-steps { display: flex; gap: 12px; }
+  .c-step { flex: 1; background: var(--code-bg); border-radius: 6px; padding: 10px; font-size: .72rem; line-height: 1.5; }
+  .c-step b { color: var(--cyan); display: block; margin-bottom: 4px; }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     SCENE 5 — DB persistence
+  ═══════════════════════════════════════════════════════════════════════ */
+  #s5 { padding: 20px; flex-direction: column; gap: 16px; align-items: center; }
+  .db-flow { display: flex; align-items: flex-start; gap: 20px; max-width: 900px; width: 100%; }
+  .db-col { flex: 1; display: flex; flex-direction: column; gap: 12px; }
+  .db-box { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+  .db-box-title { font-size: .68rem; color: var(--muted); margin-bottom: 6px; }
+  .db-schema { font-size: .7rem; line-height: 1.7; }
+  .db-schema .col-name { color: var(--cyan); }
+  .db-schema .col-type { color: var(--yellow); }
+  .db-schema .col-note { color: var(--muted); }
+  .db-mid { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding-top: 30px; }
+  .db-mid-arrow { width: 2px; height: 30px; background: var(--green); animation: grow-down 1.5s ease infinite; }
+  @keyframes grow-down { 0%,100%{opacity:.3;transform:scaleY(.5)} 50%{opacity:1;transform:scaleY(1)} }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     SCENE 6 — Python API
+  ═══════════════════════════════════════════════════════════════════════ */
+  #s6 { padding: 20px; flex-direction: column; gap: 16px; align-items: center; }
+  .py-grid { display: grid; grid-template-columns: 1fr 60px 1fr; gap: 0; align-items: start; max-width: 900px; width: 100%; }
+  .py-mid { display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding-top: 80px; gap: 6px; }
+  .py-mid-line { width: 2px; height: 40px; background: var(--border); }
+  .py-arrowhead { width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 10px solid var(--cyan); }
+  .py-label-v { font-size: .62rem; color: var(--muted); writing-mode: vertical-lr; transform: rotate(180deg); }
+  .req-badge { background: var(--green); color: #000; font-size: .65rem; font-weight: 700; padding: 2px 8px; border-radius: 4px; margin-bottom: 8px; display: inline-block; }
+  .res-badge { background: var(--blue);  color: #fff; font-size: .65rem; font-weight: 700; padding: 2px 8px; border-radius: 4px; margin-bottom: 8px; display: inline-block; }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     SCENE 7 — End-to-end full flow
+  ═══════════════════════════════════════════════════════════════════════ */
+  #s7 { padding: 20px; flex-direction: column; gap: 16px; align-items: center; }
+  .e2e-wrap { max-width: 920px; width: 100%; }
+  .e2e-row  { display: flex; align-items: center; gap: 0; margin-bottom: 4px; }
+  .e2e-node { border: 1px solid; border-radius: 8px; padding: 8px 14px; text-align: center; font-size: .78rem; min-width: 110px; }
+  .e2e-node b { display: block; font-size: .85rem; }
+  .e2e-line { flex: 1; height: 2px; background: var(--border); position: relative; overflow: hidden; min-width: 30px; }
+  .e2e-pkt  { height: 100%; width: 30px; position: absolute; left: -30px; border-radius: 2px; }
+  .e2e-label { font-size: .62rem; color: var(--muted); text-align: center; margin: 0 4px; white-space: nowrap; }
+  .e2e-down { width: 2px; height: 22px; margin: 0 auto; }
+  .e2e-section-label { font-size: .7rem; font-weight: 700; color: var(--muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing: .08em; }
+  .e2e-group { background: rgba(255,255,255,.02); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; margin-bottom: 10px; }
+
+  /* animated packet on e2e lines */
+  .run-pkt { animation: e2e-run 2.2s linear infinite; }
+  @keyframes e2e-run { 0%{left:-30px;opacity:0} 10%{opacity:1} 90%{opacity:1} 100%{left:100%;opacity:0} }
+
+  /* shared utility */
+  .mt4  { margin-top: 4px; }
+  .mt8  { margin-top: 8px; }
+  .mt16 { margin-top: 16px; }
+  .small { font-size: .72rem; color: var(--muted); }
+  .scene-heading { font-size: 1.1rem; font-weight: 700; text-align: center; }
+  .scene-sub     { font-size: .8rem; color: var(--muted); text-align: center; max-width: 620px; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- Header -->
+  <header>
+    <div class="logo">&#9654; Four Walls Trading — Architecture</div>
+    <div style="text-align:center">
+      <div class="scene-label" id="scene-label">Scene 1 / 7</div>
+      <div class="scene-title" id="scene-title">System Overview</div>
+    </div>
+    <div style="font-size:.75rem;color:var(--muted)">Use ← → or controls below</div>
+  </header>
+
+  <!-- Progress pips -->
+  <div id="progress-bar">
+    <div class="pip" onclick="goTo(0)"></div>
+    <div class="pip" onclick="goTo(1)"></div>
+    <div class="pip" onclick="goTo(2)"></div>
+    <div class="pip" onclick="goTo(3)"></div>
+    <div class="pip" onclick="goTo(4)"></div>
+    <div class="pip" onclick="goTo(5)"></div>
+    <div class="pip" onclick="goTo(6)"></div>
+  </div>
+
+  <!-- Stage -->
+  <div id="stage">
+
+    <!-- ═══ SCENE 1 : Overview ══════════════════════════════════════════════ -->
+    <div class="scene" id="s1">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:16px;width:100%">
+        <div class="scene-heading">System Architecture Overview</div>
+        <div class="scene-sub">Seven components working together in real time</div>
+
+        <!-- Row 1: main pipeline -->
+        <div style="display:flex;align-items:center;gap:0;flex-wrap:nowrap">
+
+          <div class="arch-col">
+            <div class="box box-python">
+              <div class="box-title">Client</div>
+              <div class="box-name col-red">Python Script</div>
+              <span class="tag" style="background:#7f1d1d;color:#fca5a5">requests</span>
+            </div>
+            <div class="box box-browser">
+              <div class="box-title">Client</div>
+              <div class="box-name col-blue">Browser / React</div>
+              <span class="tag" style="background:#1e3a5f;color:#93c5fd">Vite :5173</span>
+            </div>
+          </div>
+
+          <div class="arch-arrow" style="width:60px">
+            <svg width="60" height="24"><defs><marker id="ah1" markerWidth="6" markerHeight="6" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#06b6d4"/></marker></defs>
+              <line x1="4" y1="12" x2="52" y2="12" stroke="#06b6d4" stroke-width="2" marker-end="url(#ah1)"/>
+              <text x="30" y="9" font-size="8" fill="#64748b" text-anchor="middle">HTTP</text>
+            </svg>
+          </div>
+
+          <div class="box box-proxy" style="min-width:160px">
+            <div class="box-title">Node / Express</div>
+            <div class="box-name col-cyan">Proxy Server</div>
+            <div class="small mt4">proxy-server.js</div>
+            <span class="tag" style="background:#0e3a40;color:#67e8f9">:3000</span>
+          </div>
+
+          <div class="arch-arrow" style="width:60px">
+            <svg width="60" height="24"><defs><marker id="ah2" markerWidth="6" markerHeight="6" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#a855f7"/></marker></defs>
+              <line x1="4" y1="12" x2="52" y2="12" stroke="#a855f7" stroke-width="2" marker-end="url(#ah2)"/>
+              <text x="30" y="9" font-size="8" fill="#64748b" text-anchor="middle">REST/WS</text>
+            </svg>
+          </div>
+
+          <div class="box box-upstox" style="min-width:160px">
+            <div class="box-title">External API</div>
+            <div class="box-name col-purple">Upstox</div>
+            <div class="small mt4">OAuth 2.0 + Market Data</div>
+            <span class="tag" style="background:#3b0764;color:#d8b4fe">api.upstox.com</span>
+          </div>
+
+          <div class="arch-arrow" style="width:60px">
+            <svg width="60" height="24"><defs><marker id="ah3" markerWidth="6" markerHeight="6" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#22c55e"/></marker></defs>
+              <line x1="4" y1="12" x2="52" y2="12" stroke="#22c55e" stroke-width="2" marker-end="url(#ah3)"/>
+              <text x="30" y="9" font-size="8" fill="#64748b" text-anchor="middle">poll 3min</text>
+            </svg>
+          </div>
+
+          <div class="box box-tracker" style="min-width:160px">
+            <div class="box-title">Background Job</div>
+            <div class="box-name col-green">OI Tracker</div>
+            <div class="small mt4">oi-tracker.js</div>
+            <span class="tag" style="background:#14532d;color:#86efac">Cron 09:15–15:30</span>
+          </div>
+
+          <div class="arch-arrow" style="width:60px">
+            <svg width="60" height="24"><defs><marker id="ah4" markerWidth="6" markerHeight="6" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#f97316"/></marker></defs>
+              <line x1="4" y1="12" x2="52" y2="12" stroke="#f97316" stroke-width="2" marker-end="url(#ah4)"/>
+              <text x="30" y="9" font-size="8" fill="#64748b" text-anchor="middle">INSERT</text>
+            </svg>
+          </div>
+
+          <div class="arch-col">
+            <div class="box box-db">
+              <div class="box-title">Persistence</div>
+              <div class="box-name col-orange">SQLite DB</div>
+              <div class="small mt4">data/future_oi.db</div>
+            </div>
+            <div class="box box-s3">
+              <div class="box-title">Backup 15:35 IST</div>
+              <div class="box-name col-yellow">AWS S3</div>
+              <div class="small mt4">Gzip snapshot daily</div>
+            </div>
+          </div>
+
+        </div>
+
+        <div class="s1-caption">
+          React SPA → Express Proxy → Upstox API &nbsp;|&nbsp; OI Tracker → SQLite → S3 &nbsp;|&nbsp; Python scripts → same /api/* endpoints
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ SCENE 2 : React Component Tree ══════════════════════════════════ -->
+    <div class="scene" id="s2">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:14px;width:100%;max-width:880px">
+        <div class="scene-heading">React Component Tree</div>
+        <div class="scene-sub">How components nest and share state</div>
+
+        <!-- Root -->
+        <div style="animation-delay:.0s" class="comp" style="border-color:var(--blue)">
+          <div class="comp-title">Entry Point</div>
+          <div class="comp-name" style="color:var(--blue)">App.jsx</div>
+          <div class="small mt4">Router + AuthProvider</div>
+        </div>
+
+        <!-- Connector down -->
+        <div style="width:2px;height:18px;background:var(--border)"></div>
+
+        <!-- Context -->
+        <div class="comp" style="border-color:var(--purple);animation-delay:.1s">
+          <div class="comp-title">Context</div>
+          <div class="comp-name" style="color:var(--purple)">AuthContext</div>
+          <div class="small mt4">accessToken · loginWithUpstox · logout</div>
+        </div>
+
+        <div style="width:2px;height:18px;background:var(--border)"></div>
+
+        <!-- Pages row -->
+        <div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center">
+          <div class="comp" style="border-color:var(--cyan);animation-delay:.2s">
+            <div class="comp-title">Page</div>
+            <div class="comp-name" style="color:var(--cyan);font-size:.82rem">OIMonitor</div>
+          </div>
+          <div class="comp" style="border-color:var(--cyan);animation-delay:.25s">
+            <div class="comp-title">Page</div>
+            <div class="comp-name" style="color:var(--cyan);font-size:.82rem">NiftyATMEntry</div>
+          </div>
+          <div class="comp" style="border-color:var(--cyan);animation-delay:.3s">
+            <div class="comp-title">Page</div>
+            <div class="comp-name" style="color:var(--cyan);font-size:.82rem">OrderAnalysis</div>
+          </div>
+          <div class="comp" style="border-color:var(--cyan);animation-delay:.35s">
+            <div class="comp-title">Page</div>
+            <div class="comp-name" style="color:var(--cyan);font-size:.82rem">PivotCalculator</div>
+          </div>
+          <div class="comp" style="border-color:var(--cyan);animation-delay:.4s">
+            <div class="comp-title">Page</div>
+            <div class="comp-name" style="color:var(--cyan);font-size:.82rem">AwsCostAnalysis</div>
+          </div>
+        </div>
+
+        <div style="width:2px;height:14px;background:var(--border)"></div>
+
+        <!-- Hooks row -->
+        <div style="background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:12px 20px;width:100%;max-width:700px">
+          <div style="font-size:.68rem;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.06em">Custom Hooks used by pages</div>
+          <div class="hook-row">
+            <div class="hook"><span>useUpstoxPolling</span> — polls market data every 5s via REST/WS</div>
+            <div class="hook"><span>useLiveWS</span> — WebSocket tick streaming from proxy fan-out</div>
+            <div class="hook"><span>useAuth</span> — reads token from AuthContext</div>
+            <div class="hook"><span>apiFetch</span> — wraps fetch with auth header injection</div>
+          </div>
+        </div>
+
+        <div style="background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:10px 20px;width:100%;max-width:700px">
+          <div style="font-size:.68rem;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.06em">State managed inside OIMonitor</div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <span class="tag" style="background:#0e3a40;color:#67e8f9">oiHistory[ ]</span>
+            <span class="tag" style="background:#0e3a40;color:#67e8f9">currentOI</span>
+            <span class="tag" style="background:#0e3a40;color:#67e8f9">oiAlerts[ ]</span>
+            <span class="tag" style="background:#0e3a40;color:#67e8f9">isLive</span>
+            <span class="tag" style="background:#14532d;color:#86efac">localStorage ← persisted</span>
+            <span class="tag" style="background:#431407;color:#fdba74">SQLite DB ← persisted</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ SCENE 3 : Auth flow ══════════════════════════════════════════════ -->
+    <div class="scene" id="s3">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:16px;width:100%;max-width:860px">
+        <div class="scene-heading">OAuth Authentication Flow</div>
+        <div class="scene-sub">How the browser gets a live market-data token from Upstox</div>
+
+        <!-- Animated flow bar -->
+        <div class="flow-row">
+          <div class="flow-node" style="border-color:var(--blue)">
+            <div style="color:var(--blue)" class="fn-name">Browser</div>
+            <div class="fn-sub">React / User</div>
+          </div>
+          <div class="flow-edge">
+            <div class="flow-line"><div class="flow-dot" style="animation-delay:0s"></div></div>
+            <div class="flow-label">GET /api/auth/login</div>
+          </div>
+          <div class="flow-node" style="border-color:var(--cyan)">
+            <div style="color:var(--cyan)" class="fn-name">Proxy Server</div>
+            <div class="fn-sub">proxy-server.js</div>
+          </div>
+          <div class="flow-edge">
+            <div class="flow-line"><div class="flow-dot" style="animation-delay:.7s"></div></div>
+            <div class="flow-label">302 → Upstox</div>
+          </div>
+          <div class="flow-node" style="border-color:var(--purple)">
+            <div style="color:var(--purple)" class="fn-name">Upstox</div>
+            <div class="fn-sub">OAuth 2.0</div>
+          </div>
+          <div class="flow-edge">
+            <div class="flow-line"><div class="flow-dot" style="animation-delay:1.4s"></div></div>
+            <div class="flow-label">?code=xxx callback</div>
+          </div>
+          <div class="flow-node" style="border-color:var(--cyan)">
+            <div style="color:var(--cyan)" class="fn-name">Proxy Server</div>
+            <div class="fn-sub">exchanges code→token</div>
+          </div>
+          <div class="flow-edge">
+            <div class="flow-line"><div class="flow-dot" style="animation-delay:2.1s"></div></div>
+            <div class="flow-label">redirect ?token=</div>
+          </div>
+          <div class="flow-node" style="border-color:var(--green)">
+            <div style="color:var(--green)" class="fn-name">localStorage</div>
+            <div class="fn-sub">token saved</div>
+          </div>
+        </div>
+
+        <!-- Steps -->
+        <div class="auth-steps">
+          <div class="step">
+            <div class="step-num">STEP 1 — User clicks Login</div>
+            <div class="step-desc">Browser navigates to <code style="color:var(--cyan)">GET /api/auth/login</code>. Proxy builds the Upstox authorise URL with <code>client_id</code>, <code>redirect_uri</code>, <code>response_type=code</code> and issues a <b>302 redirect</b>.</div>
+          </div>
+          <div class="step">
+            <div class="step-num">STEP 2 — User approves on Upstox</div>
+            <div class="step-desc">Upstox shows a consent screen. On approval it calls back to <code style="color:var(--cyan)">GET /api/auth/callback?code=xxx</code> on the proxy.</div>
+          </div>
+          <div class="step">
+            <div class="step-num">STEP 3 — Token exchange</div>
+            <div class="step-desc">Proxy POSTs the <code>code</code> + <code>client_secret</code> to Upstox token endpoint. Gets back an <code>access_token</code> (valid for the trading session).</div>
+          </div>
+          <div class="step">
+            <div class="step-num">STEP 4 — Token delivered to SPA</div>
+            <div class="step-desc">Proxy redirects browser to <code style="color:var(--cyan)">FRONTEND_URI?token=&lt;access_token&gt;</code>. <code>AuthContext</code> strips the query param and stores the token in <b>localStorage</b>. All subsequent <code>apiFetch</code> calls inject <code>Authorization: Bearer &lt;token&gt;</code>.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ SCENE 4 : Live data flow ════════════════════════════════════════ -->
+    <div class="scene" id="s4">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:16px;width:100%;max-width:860px">
+        <div class="scene-heading">Live Market Data Flow</div>
+        <div class="scene-sub">WebSocket tick streaming from Upstox → browser in real time</div>
+
+        <!-- Animated live flow -->
+        <div class="live-flow">
+          <div class="live-node" style="border-color:var(--purple)">
+            <div style="color:var(--purple);font-weight:700">Upstox WS Feed</div>
+            <div class="small mt4">Protobuf ticks</div>
+          </div>
+          <div class="live-arrow">
+            <div class="live-line">
+              <div class="live-packet" style="background:var(--purple);animation-delay:0s"></div>
+            </div>
+            <div class="live-label">protobuf decode</div>
+          </div>
+          <div class="live-node" style="border-color:var(--cyan)">
+            <div style="color:var(--cyan);font-weight:700">upstox-feed.js</div>
+            <div class="small mt4">parse + emit</div>
+          </div>
+          <div class="live-arrow">
+            <div class="live-line">
+              <div class="live-packet" style="background:var(--cyan);animation-delay:.5s"></div>
+            </div>
+            <div class="live-label">fan-out to clients</div>
+          </div>
+          <div class="live-node" style="border-color:var(--cyan)">
+            <div style="color:var(--cyan);font-weight:700">Proxy WS Server</div>
+            <div class="small mt4">clientSubs Map</div>
+          </div>
+          <div class="live-arrow">
+            <div class="live-line">
+              <div class="live-packet" style="background:var(--blue);animation-delay:1s"></div>
+            </div>
+            <div class="live-label">ws://localhost:3000</div>
+          </div>
+          <div class="live-node" style="border-color:var(--blue)">
+            <div style="color:var(--blue);font-weight:700">useLiveWS hook</div>
+            <div class="small mt4">React state update</div>
+          </div>
+          <div class="live-arrow">
+            <div class="live-line">
+              <div class="live-packet" style="background:var(--green);animation-delay:1.5s"></div>
+            </div>
+            <div class="live-label">setCurrentOI / LTP</div>
+          </div>
+          <div class="live-node" style="border-color:var(--green)">
+            <div style="color:var(--green);font-weight:700">OIMonitor UI</div>
+            <div class="small mt4">renders every 5s</div>
+          </div>
+        </div>
+
+        <!-- 3-min capture box -->
+        <div class="capture-box">
+          <div class="capture-title">&#9201; 3-Minute OI Capture Cycle (browser-side)</div>
+          <div class="capture-steps">
+            <div class="c-step">
+              <b>1. Timer fires</b>
+              Aligned to 15:12 anchor. First tick captured immediately when Connect is pressed.
+            </div>
+            <div class="c-step">
+              <b>2. Snapshot built</b>
+              Reads <code style="color:var(--cyan)">latestDataRef.current</code> → { oi, ltp, timestamp }. Computes Δ from session-open OI.
+            </div>
+            <div class="c-step">
+              <b>3. State + Storage</b>
+              <code style="color:var(--green)">setOiHistory()</code> → React re-render. Saved to <code>localStorage</code>. Last 10 rows shown in table.
+            </div>
+            <div class="c-step">
+              <b>4. DB persist</b>
+              <code style="color:var(--orange)">POST /api/oi/save</code> with { ts, symbol, oi, ltp } → SQLite <code>future_oi</code> table. Fire-and-forget.
+            </div>
+          </div>
+        </div>
+
+        <!-- Polling fallback note -->
+        <div class="small" style="text-align:center">
+          Fallback: <code style="color:var(--yellow)">useUpstoxPolling</code> polls REST every <b>5 s</b> when WebSocket is unavailable &nbsp;·&nbsp;
+          OI tracker on the server independently polls every <b>3 min</b> via cron regardless of browser state
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ SCENE 5 : DB persistence ════════════════════════════════════════ -->
+    <div class="scene" id="s5">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:14px;width:100%;max-width:900px">
+        <div class="scene-heading">Database Persistence &amp; Backup</div>
+        <div class="scene-sub">SQLite stores every OI snapshot · S3 backs up daily</div>
+
+        <div class="db-flow">
+
+          <!-- Schema -->
+          <div class="db-col">
+            <div class="db-box" style="border-color:var(--orange)">
+              <div class="db-box-title">TABLE: future_oi (SQLite)</div>
+              <div class="db-schema">
+                <div><span class="col-name">id         </span><span class="col-type">INTEGER</span> <span class="col-note">PRIMARY KEY AUTOINCREMENT</span></div>
+                <div><span class="col-name">ts         </span><span class="col-type">INTEGER</span> <span class="col-note">epoch ms — index</span></div>
+                <div><span class="col-name">date       </span><span class="col-type">TEXT   </span> <span class="col-note">YYYY-MM-DD — index</span></div>
+                <div><span class="col-name">time       </span><span class="col-type">TEXT   </span> <span class="col-note">HH:MM:SS IST</span></div>
+                <div><span class="col-name">symbol     </span><span class="col-type">TEXT   </span> <span class="col-note">NIFTY / BANKNIFTY / SENSEX</span></div>
+                <div><span class="col-name">expiry     </span><span class="col-type">TEXT   </span> <span class="col-note">nearest contract expiry</span></div>
+                <div><span class="col-name">oi         </span><span class="col-type">INTEGER</span> <span class="col-note">open interest (contracts)</span></div>
+                <div><span class="col-name">oi_change  </span><span class="col-type">INTEGER</span> <span class="col-note">vs previous snapshot</span></div>
+                <div><span class="col-name">ltp        </span><span class="col-type">REAL   </span> <span class="col-note">last traded price ₹</span></div>
+                <div><span class="col-name">volume     </span><span class="col-type">INTEGER</span> <span class="col-note">day volume</span></div>
+                <div><span class="col-name">exchange   </span><span class="col-type">TEXT   </span> <span class="col-note">NFO / BFO</span></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Middle arrows -->
+          <div class="db-mid" style="gap:12px">
+            <div style="font-size:.65rem;color:var(--green);font-weight:700">WRITE</div>
+            <div class="db-mid-arrow"></div>
+            <div style="font-size:.62rem;color:var(--muted);text-align:center">oi-tracker.js<br/>3min cron</div>
+            <div class="db-mid-arrow" style="animation-delay:.5s"></div>
+            <div style="font-size:.62rem;color:var(--muted);text-align:center">browser<br/>captureOI</div>
+            <div class="db-mid-arrow" style="animation-delay:1s"></div>
+            <div style="font-size:.65rem;color:var(--cyan);font-weight:700;margin-top:8px">READ</div>
+            <div class="db-mid-arrow" style="background:var(--cyan);animation-delay:1.5s"></div>
+            <div style="font-size:.62rem;color:var(--muted);text-align:center">/api/oi/history<br/>?date=today</div>
+          </div>
+
+          <!-- Read APIs + Backup -->
+          <div class="db-col">
+            <div class="db-box" style="border-color:var(--cyan)">
+              <div class="db-box-title">API: GET /api/oi/history</div>
+              <div style="font-size:.75rem;line-height:1.7">
+                <div><code style="color:var(--yellow)">?date=YYYY-MM-DD</code> → all today's rows ASC</div>
+                <div><code style="color:var(--yellow)">?symbol=NIFTY&amp;date=</code> → filtered + ASC</div>
+                <div><code style="color:var(--yellow)">?symbol=NIFTY</code> → latest N rows DESC</div>
+                <div><code style="color:var(--yellow)">?limit=200</code> → default cap</div>
+              </div>
+            </div>
+            <div class="db-box" style="border-color:var(--green)">
+              <div class="db-box-title">API: POST /api/oi/save</div>
+              <div style="font-size:.75rem;line-height:1.7">
+                <div>Body: <code style="color:var(--yellow)">{ ts, symbol, oi, ltp }</code></div>
+                <div>Computes <code>oi_change</code> server-side using lastOI dict</div>
+                <div>Inserts into same <code>future_oi</code> table</div>
+              </div>
+            </div>
+            <div class="db-box" style="border-color:var(--yellow)">
+              <div class="db-box-title">S3 Backup — 15:35 IST daily</div>
+              <div style="font-size:.75rem;line-height:1.7">
+                <div>Gzip-compress the SQLite file</div>
+                <div>Upload to <code style="color:var(--yellow)">oi-backups/future_oi-YYYY-MM-DD.db.gz</code></div>
+                <div>Guard: runs only once per calendar day</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ SCENE 6 : Python API ═════════════════════════════════════════════ -->
+    <div class="scene" id="s6">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:12px;width:100%;max-width:940px">
+        <div class="scene-heading">Calling the API from Python</div>
+        <div class="scene-sub">Same /api/* endpoints work from any HTTP client — here with the <code>requests</code> library</div>
+
+        <div class="py-grid">
+
+          <!-- Left: request code -->
+          <div>
+            <div class="req-badge">REQUEST → proxy-server.js</div>
+            <pre><code><span class="kw">import</span> requests
+
+BASE <span class="op">=</span> <span class="str">"http://localhost:3000"</span>
+TOKEN <span class="op">=</span> <span class="str">"your_upstox_access_token"</span>
+
+HEADERS <span class="op">=</span> {
+    <span class="str">"Authorization"</span>: <span class="str">f"Bearer {TOKEN}"</span>,
+    <span class="str">"Content-Type"</span>: <span class="str">"application/json"</span>,
+}
+
+<span class="cm"># ── 1. Get today's OI history ──────────────────</span>
+<span class="kw">import</span> datetime
+today <span class="op">=</span> datetime.date.today().isoformat()   <span class="cm"># "2025-06-16"</span>
+
+resp <span class="op">=</span> requests.<span class="fn">get</span>(
+    <span class="str">f"{BASE}/api/oi/history"</span>,
+    params<span class="op">=</span>{<span class="str">"date"</span>: today, <span class="str">"symbol"</span>: <span class="str">"NIFTY"</span>, <span class="str">"limit"</span>: <span class="num">200</span>},
+    headers<span class="op">=</span>HEADERS,
+)
+data <span class="op">=</span> resp.<span class="fn">json</span>()[<span class="str">"data"</span>]   <span class="cm"># list of OI rows</span>
+
+<span class="cm"># ── 2. Save a custom OI snapshot ───────────────</span>
+payload <span class="op">=</span> {
+    <span class="str">"ts"</span>:     <span class="num">1718521800000</span>,   <span class="cm"># epoch ms</span>
+    <span class="str">"symbol"</span>: <span class="str">"NIFTY"</span>,
+    <span class="str">"oi"</span>:     <span class="num">13_450_000</span>,
+    <span class="str">"ltp"</span>:    <span class="num">24320.50</span>,
+}
+requests.<span class="fn">post</span>(
+    <span class="str">f"{BASE}/api/oi/save"</span>,
+    json<span class="op">=</span>payload,
+    headers<span class="op">=</span>HEADERS,
+)
+
+<span class="cm"># ── 3. Place an order (dry-run) ────────────────</span>
+order <span class="op">=</span> {
+    <span class="str">"instrument_token"</span>: <span class="str">"NSE_FO|51714"</span>,
+    <span class="str">"transaction_type"</span>: <span class="str">"BUY"</span>,
+    <span class="str">"quantity"</span>:         <span class="num">50</span>,
+    <span class="str">"product"</span>:          <span class="str">"MIS"</span>,
+    <span class="str">"order_type"</span>:       <span class="str">"MARKET"</span>,
+    <span class="str">"dry_run"</span>:          <span class="kw">True</span>,
+}
+requests.<span class="fn">post</span>(
+    <span class="str">f"{BASE}/api/bot/order/start"</span>,
+    json<span class="op">=</span>order, headers<span class="op">=</span>HEADERS,
+)</code></pre>
+          </div>
+
+          <!-- Middle arrow -->
+          <div class="py-mid">
+            <div style="font-size:.65rem;color:var(--muted);margin-bottom:4px">sends</div>
+            <div class="py-mid-line"></div>
+            <div class="py-arrowhead"></div>
+            <div style="font-size:.65rem;color:var(--muted);margin-top:4px">receives</div>
+            <div style="transform:rotate(180deg)" class="py-arrowhead"></div>
+            <div class="py-mid-line"></div>
+          </div>
+
+          <!-- Right: response -->
+          <div>
+            <div class="res-badge">RESPONSE from Express</div>
+            <pre><code><span class="cm"># ── Response: GET /api/oi/history ─────────────</span>
+{
+  <span class="str">"status"</span>: <span class="str">"success"</span>,
+  <span class="str">"data"</span>: [
+    {
+      <span class="str">"id"</span>:        <span class="num">1</span>,
+      <span class="str">"ts"</span>:        <span class="num">1718521800000</span>,
+      <span class="str">"date"</span>:      <span class="str">"2025-06-16"</span>,
+      <span class="str">"time"</span>:      <span class="str">"09:15:00"</span>,
+      <span class="str">"symbol"</span>:    <span class="str">"NIFTY"</span>,
+      <span class="str">"expiry"</span>:    <span class="str">"2025-06-26"</span>,
+      <span class="str">"oi"</span>:        <span class="num">13450000</span>,
+      <span class="str">"oi_change"</span>: <span class="num">0</span>,
+      <span class="str">"ltp"</span>:       <span class="num">24320.50</span>,
+      <span class="str">"volume"</span>:    <span class="num">125000</span>,
+      <span class="str">"exchange"</span>:  <span class="str">"NFO"</span>
+    },
+    <span class="cm">... up to limit rows ...</span>
+  ]
+}
+
+<span class="cm"># ── Response: POST /api/oi/save ────────────────</span>
+{ <span class="str">"status"</span>: <span class="str">"success"</span> }
+
+<span class="cm"># ── Response: POST /api/bot/order/start ────────</span>
+{
+  <span class="str">"botId"</span>:    <span class="str">"bot_1718521800000"</span>,
+  <span class="str">"status"</span>:   <span class="str">"started"</span>,
+  <span class="str">"dry_run"</span>:  <span class="kw">true</span>,
+  <span class="str">"message"</span>:  <span class="str">"Order bot started"</span>
+}
+
+<span class="cm"># ── How request body flows through the system ──</span>
+<span class="cm">#   Python dict  →  json= kwarg  →  JSON body</span>
+<span class="cm">#   Express req.body (parsed by express.json())</span>
+<span class="cm">#   → destructured → validated → SQLite / Upstox</span>
+</code></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ SCENE 7 : End-to-end animated flow ══════════════════════════════ -->
+    <div class="scene" id="s7">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:8px;width:100%;max-width:940px">
+        <div class="scene-heading">End-to-End: Everything Together</div>
+        <div class="scene-sub">One complete trading session from browser open to DB backup</div>
+
+        <div class="e2e-wrap">
+
+          <!-- GROUP 1: startup -->
+          <div class="e2e-group">
+            <div class="e2e-section-label">1 · App Startup</div>
+            <div class="e2e-row">
+              <div class="e2e-node" style="border-color:var(--blue)"><b style="color:var(--blue)">Browser</b>opens app</div>
+              <div class="e2e-label">→</div>
+              <div class="e2e-node" style="border-color:var(--blue)"><b style="color:var(--blue)">React</b>mounts</div>
+              <div class="e2e-label">→</div>
+              <div class="e2e-node" style="border-color:var(--cyan)"><b style="color:var(--cyan)">OIMonitor</b>useEffect</div>
+              <div class="e2e-label">→</div>
+              <div class="e2e-node" style="border-color:var(--orange)"><b style="color:var(--orange)">GET /api/oi/history</b><span style="font-size:.68rem">?date=today&amp;limit=200</span></div>
+              <div class="e2e-label">→</div>
+              <div class="e2e-node" style="border-color:var(--orange)"><b style="color:var(--orange)">SQLite</b>today's rows</div>
+              <div class="e2e-label">→</div>
+              <div class="e2e-node" style="border-color:var(--green)"><b style="color:var(--green)">Table</b>shows last 10</div>
+            </div>
+          </div>
+
+          <!-- GROUP 2: auth -->
+          <div class="e2e-group">
+            <div class="e2e-section-label">2 · Login</div>
+            <div class="e2e-row">
+              <div class="e2e-node" style="border-color:var(--blue)"><b style="color:var(--blue)">User</b>clicks Login</div>
+              <div class="e2e-label">→</div>
+              <div class="e2e-node" style="border-color:var(--cyan)"><b style="color:var(--cyan)">/api/auth/login</b>302 redirect</div>
+              <div class="e2e-label">→</div>
+              <div class="e2e-node" style="border-color:var(--purple)"><b style="color:var(--purple)">Upstox</b>consent</div>
+              <div class="e2e-label">→</div>
+              <div class="e2e-node" style="border-color:var(--cyan)"><b style="color:var(--cyan)">/api/auth/callback</b>code exchange</div>
+              <div class="e2e-label">→</div>
+              <div class="e2e-node" style="border-color:var(--green)"><b style="color:var(--green)">localStorage</b>token saved</div>
+              <div class="e2e-label">→</div>
+              <div class="e2e-node" style="border-color:var(--green)"><b style="color:var(--green)">WS connects</b>live feed starts</div>
+            </div>
+          </div>
+
+          <!-- GROUP 3: live data -->
+          <div class="e2e-group">
+            <div class="e2e-section-label">3 · Live Data Every 5s</div>
+            <div class="e2e-row">
+              <div class="e2e-node" style="border-color:var(--purple)"><b style="color:var(--purple)">Upstox WS</b>tick</div>
+              <div class="e2e-label">→</div>
+              <div class="e2e-node" style="border-color:var(--cyan)"><b style="color:var(--cyan)">upstox-feed.js</b>decode protobuf</div>
+              <div class="e2e-label">→</div>
+              <div class="e2e-node" style="border-color:var(--cyan)"><b style="color:var(--cyan)">proxy fan-out</b>clientSubs</div>
+              <div class="e2e-label">→</div>
+              <div class="e2e-node" style="border-color:var(--blue)"><b style="color:var(--blue)">useLiveWS</b>React state</div>
+              <div class="e2e-label">→</div>
+              <div class="e2e-node" style="border-color:var(--green)"><b style="color:var(--green)">LTP card</b>updates</div>
+            </div>
+          </div>
+
+          <!-- GROUP 4: OI capture -->
+          <div class="e2e-group">
+            <div class="e2e-section-label">4 · Every 3 Minutes — OI Snapshot (two parallel paths)</div>
+            <div style="display:flex;gap:10px;flex-direction:column">
+              <div class="e2e-row">
+                <div class="e2e-node" style="border-color:var(--green);min-width:90px"><b style="color:var(--green)">Browser</b>captureOI</div>
+                <div class="e2e-label">→</div>
+                <div class="e2e-node" style="border-color:var(--green)"><b style="color:var(--green)">setOiHistory</b>display 10 rows</div>
+                <div class="e2e-label">→</div>
+                <div class="e2e-node" style="border-color:var(--green)"><b style="color:var(--green)">localStorage</b>saved</div>
+                <div class="e2e-label">+</div>
+                <div class="e2e-node" style="border-color:var(--orange)"><b style="color:var(--orange)">POST /api/oi/save</b>{ ts, oi, ltp }</div>
+                <div class="e2e-label">→</div>
+                <div class="e2e-node" style="border-color:var(--orange)"><b style="color:var(--orange)">SQLite</b>INSERT</div>
+              </div>
+              <div class="e2e-row">
+                <div class="e2e-node" style="border-color:var(--purple);min-width:90px"><b style="color:var(--purple)">oi-tracker</b>cron poll</div>
+                <div class="e2e-label">→</div>
+                <div class="e2e-node" style="border-color:var(--purple)"><b style="color:var(--purple)">Upstox REST</b>quotes API</div>
+                <div class="e2e-label">→</div>
+                <div class="e2e-node" style="border-color:var(--orange)"><b style="color:var(--orange)">SQLite</b>all 3 symbols</div>
+                <div class="e2e-label">→</div>
+                <div style="font-size:.72rem;color:var(--muted)">(NIFTY, BANKNIFTY, SENSEX)</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- GROUP 5: Python + EoD -->
+          <div class="e2e-group">
+            <div class="e2e-section-label">5 · Python Analysis &amp; End-of-Day Backup</div>
+            <div style="display:flex;gap:10px;flex-direction:column">
+              <div class="e2e-row">
+                <div class="e2e-node" style="border-color:var(--red);min-width:90px"><b style="color:var(--red)">Python script</b>requests</div>
+                <div class="e2e-label">→</div>
+                <div class="e2e-node" style="border-color:var(--cyan)"><b style="color:var(--cyan)">GET /api/oi/history</b>request body: params</div>
+                <div class="e2e-label">→</div>
+                <div class="e2e-node" style="border-color:var(--orange)"><b style="color:var(--orange)">SQLite</b>SELECT rows</div>
+                <div class="e2e-label">→</div>
+                <div class="e2e-node" style="border-color:var(--red)"><b style="color:var(--red)">Python</b>analysis / chart</div>
+              </div>
+              <div class="e2e-row">
+                <div class="e2e-node" style="border-color:var(--orange);min-width:90px"><b style="color:var(--orange)">15:35 IST</b>cron fires</div>
+                <div class="e2e-label">→</div>
+                <div class="e2e-node" style="border-color:var(--orange)"><b style="color:var(--orange)">SQLite</b>gzip compress</div>
+                <div class="e2e-label">→</div>
+                <div class="e2e-node" style="border-color:var(--yellow)"><b style="color:var(--yellow)">AWS S3</b>upload .db.gz</div>
+                <div class="e2e-label">→</div>
+                <div style="font-size:.72rem;color:var(--muted)">permanent off-site backup</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /stage -->
+
+  <!-- Controls -->
+  <div id="controls">
+    <button onclick="prev()">&#8592; Prev</button>
+    <button class="primary" id="play-btn" onclick="togglePlay()">&#9646;&#9646; Pause</button>
+    <span id="counter">1 / 7</span>
+    <button onclick="next()">Next &#8594;</button>
+    <span id="auto-label">Auto-advance: 8s</span>
+  </div>
+
+</div><!-- /app -->
+
+<script>
+  const SCENES = [
+    { id:'s1', label:'System Overview',             desc:'Seven components working together' },
+    { id:'s2', label:'React Component Tree',        desc:'Component hierarchy &amp; state' },
+    { id:'s3', label:'OAuth Authentication Flow',   desc:'Login → token → localStorage' },
+    { id:'s4', label:'Live Market Data Flow',       desc:'WS ticks → React UI → DB' },
+    { id:'s5', label:'Database Persistence',        desc:'SQLite schema, APIs, S3 backup' },
+    { id:'s6', label:'Python API Integration',      desc:'Request body, response shape' },
+    { id:'s7', label:'End-to-End Full Flow',        desc:'Complete trading session walkthrough' },
+  ];
+
+  let current = 0;
+  let timer = null;
+  let playing = true;
+  const INTERVAL = 8000;
+
+  function render() {
+    SCENES.forEach((s, i) => {
+      const el = document.getElementById(s.id);
+      el.classList.toggle('active', i === current);
+    });
+    const pips = document.querySelectorAll('.pip');
+    pips.forEach((p, i) => {
+      p.classList.toggle('active', i === current);
+      p.classList.toggle('done',   i < current);
+    });
+    document.getElementById('counter').textContent = `${current + 1} / ${SCENES.length}`;
+    document.getElementById('scene-label').textContent = `Scene ${current + 1} / ${SCENES.length}`;
+    document.getElementById('scene-title').textContent = SCENES[current].label;
+  }
+
+  function next() {
+    current = (current + 1) % SCENES.length;
+    render();
+    if (playing) resetTimer();
+  }
+
+  function prev() {
+    current = (current - 1 + SCENES.length) % SCENES.length;
+    render();
+    if (playing) resetTimer();
+  }
+
+  function goTo(i) {
+    current = i;
+    render();
+    if (playing) resetTimer();
+  }
+
+  function resetTimer() {
+    clearInterval(timer);
+    timer = setInterval(next, INTERVAL);
+  }
+
+  function togglePlay() {
+    playing = !playing;
+    document.getElementById('play-btn').textContent = playing ? '⏸ Pause' : '▶ Play';
+    if (playing) resetTimer();
+    else clearInterval(timer);
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight') next();
+    if (e.key === 'ArrowLeft')  prev();
+    if (e.key === ' ')          { e.preventDefault(); togglePlay(); }
+  });
+
+  render();
+  resetTimer();
+</script>
+</body>
+</html>
