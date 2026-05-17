@@ -174,8 +174,11 @@ backups/
 
 # Database files
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
 *.sqlite3
+data/
 
 # ============================================
 # Python (if you add Python scripts)
